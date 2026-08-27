@@ -42,7 +42,11 @@ include(CTest)
 if(BUILD_TESTING)
     add_executable(ffb_protocol_tests tests/cpp/protocol_tests.cpp src/telemetry_protocol.cpp)
     target_include_directories(ffb_protocol_tests PRIVATE src)
-    target_compile_definitions(ffb_protocol_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_definitions(ffb_protocol_tests PRIVATE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        FFB_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    )
     if (MSVC)
         target_compile_options(ffb_protocol_tests PRIVATE /W4 /WX /EHsc)
     else()

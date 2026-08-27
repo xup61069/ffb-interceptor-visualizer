@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 import struct
+from pathlib import Path
 
 import pytest
 
@@ -37,6 +38,26 @@ def test_decode_and_fragmented_stream() -> None:
     assert list(iter_frames(buf)) == []
     buf.extend(fixture_frame()[17:])
     assert next(iter(iter_frames(buf))).sequence == 9
+
+
+def test_shared_golden_fixture() -> None:
+    path = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "event_v1.hex"
+    frame = decode_frame(bytes.fromhex(path.read_text(encoding="ascii")))
+    assert frame.message_type == 5
+    assert frame.flags == 165
+    assert frame.sequence == 7
+    assert frame.qpc_ticks == 123456789
+    assert frame.process_id == 4242
+    assert frame.qpc_frequency == 10_000_000
+    assert frame.device_id == 11
+    assert frame.effect_id == 22
+    assert frame.effect_kind == 8
+    assert frame.command == 2
+    assert frame.axes == (1, -2)
+    assert frame.directions == (3, -4)
+    assert len(frame.conditions) == 1
+    assert frame.type_specific_size == 24
+    assert frame.text == "fixture.exe"
 
 
 @pytest.mark.parametrize(
