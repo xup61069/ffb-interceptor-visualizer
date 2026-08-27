@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import os
 import threading
 from collections.abc import Callable
@@ -45,7 +46,10 @@ class PipeServer:
                 handle = win32pipe.CreateNamedPipe(
                     PIPE_NAME,
                     win32pipe.PIPE_ACCESS_INBOUND,
-                    win32pipe.PIPE_TYPE_BYTE | win32pipe.PIPE_READMODE_BYTE | win32pipe.PIPE_WAIT,
+                    win32pipe.PIPE_TYPE_BYTE
+                    | win32pipe.PIPE_READMODE_BYTE
+                    | win32pipe.PIPE_WAIT
+                    | getattr(win32pipe, "PIPE_REJECT_REMOTE_CLIENTS", 0),
                     win32pipe.PIPE_UNLIMITED_INSTANCES,
                     64 * 1024,
                     64 * 1024,
@@ -53,6 +57,8 @@ class PipeServer:
                     _security_attributes(),
                 )
                 win32pipe.ConnectNamedPipe(handle, None)
+                client_pid = _client_pid(handle)
+                first_frame = True
                 buf = bytearray()
                 while not self._stop.is_set():
                     status, chunk = win32file.ReadFile(handle, 64 * 1024)
@@ -61,6 +67,14 @@ class PipeServer:
                     buf.extend(chunk)
                     try:
                         for frame in iter_frames(buf):
+                            if (
+                                first_frame
+                                and frame.message_type == 1
+                                and client_pid
+                                and frame.process_id != client_pid
+                            ):
+                                raise ProtocolError("Hello PID does not match pipe client")
+                            first_frame = False
                             self._on_frame(frame)
                     except ProtocolError:
                         self.errors += 1
@@ -90,4 +104,16 @@ def _security_attributes():
         attributes.SECURITY_DESCRIPTOR = descriptor
         return attributes
     except (ImportError, OSError, RuntimeError, AttributeError):
+        return None
+
+
+def _client_pid(handle: int) -> int | None:
+    """Return the kernel-reported client PID, when supported by this Windows build."""
+    try:
+        pid = ctypes.c_ulong(0)
+        function = ctypes.windll.kernel32.GetNamedPipeClientProcessId
+        function.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulong)]
+        function.restype = ctypes.c_bool
+        return int(pid.value) if function(int(handle), ctypes.byref(pid)) else None
+    except (AttributeError, OSError, TypeError, ValueError):
         return None
