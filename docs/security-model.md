@@ -6,7 +6,9 @@ PID with `GetNamedPipeClientProcessId`. This prevents remote clients and other
 users in normal configurations; each connection must begin with a matching
 `Hello`, and the server bounds active client readers. A process running as the
 same user can still impersonate a proxy, so the pipe is telemetry, not an
-authentication boundary.
+authentication boundary. If pywin32 cannot construct the current-user ACL, the
+viewer refuses to create the production pipe instead of falling back to a
+default DACL.
 
 The proxy never injects code, patches vtables, scans memory, reads arbitrary
 effect payloads, or changes FFB semantics. It records only bounded standard
