@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
+import multiprocessing
 import os
-import sys
 import threading
 import time
 from contextlib import contextmanager
@@ -54,6 +54,18 @@ def _write(handle: int, data: bytes) -> None:
     import win32file  # ty: ignore[unresolved-import]
 
     win32file.WriteFile(handle, data)
+
+
+def _produce_frames(total: int) -> None:
+    """Write a burst from a separate process, like the native proxy does."""
+
+    with _connect_writer() as writer:
+        _write(writer, frame_bytes(message_type=1, sequence=0))
+        for _ in range(128):
+            _write(writer, frame_bytes(sequence=0))
+        for sequence in range(1, total + 1):
+            timestamp = time.perf_counter_ns()
+            _write(writer, frame_bytes(sequence=sequence, qpc_ticks=timestamp))
 
 
 @pytest.mark.skipif(os.name != "nt", reason="uses the production Windows named pipe")
@@ -109,44 +121,38 @@ def test_windows_pipe_rejects_hello_pid_mismatch() -> None:
 @pytest.mark.skipif(os.name != "nt", reason="uses the production Windows named pipe")
 def test_windows_pipe_ingestion_p99_under_five_milliseconds_at_1000_events_per_second() -> None:
     total = 2_000
-    sent: dict[int, int] = {}
     latencies_ns: list[int] = []
+    production_ticks: list[int] = []
     delivered = threading.Event()
 
     def on_frame(value: object) -> None:
         sequence = value.sequence  # ty: ignore[unresolved-attribute]
-        if sequence in sent:
-            latencies_ns.append(time.perf_counter_ns() - sent[sequence])
+        if 1 <= sequence <= total:
+            latencies_ns.append(time.perf_counter_ns() - value.qpc_ticks)  # ty: ignore[unresolved-attribute]
+            if sequence == 1 or sequence == total:
+                production_ticks.append(value.qpc_ticks)  # ty: ignore[unresolved-attribute]
             if len(latencies_ns) == total:
                 delivered.set()
 
     server = pipe_server.PipeServer(on_frame)
     server.start()
-    # The production proxy is a separate C++ process.  Keep the synthetic
-    # writer/reader harness from measuring Python's default 5 ms GIL scheduling
-    # quantum instead of the pipe parser's latency.
-    previous_switch_interval = sys.getswitchinterval()
-    sys.setswitchinterval(0.001)
+    producer = multiprocessing.Process(target=_produce_frames, args=(total,))
+    producer.start()
     try:
-        with _connect_writer() as writer:
-            _write(writer, frame_bytes(message_type=1, sequence=0))
-            production_start = time.perf_counter_ns()
-            for sequence in range(1, total + 1):
-                encoded = frame_bytes(sequence=sequence)
-                sent[sequence] = time.perf_counter_ns()
-                _write(writer, encoded)
-                # Let the reader thread run; a real proxy is a separate
-                # process and does not hold the test process' GIL.
-                time.sleep(0)
-            production_elapsed = time.perf_counter_ns() - production_start
         assert delivered.wait(10.0)
-        rate = total / (production_elapsed / 1_000_000_000)
+        producer.join(5.0)
+        assert producer.exitcode == 0
+        assert len(production_ticks) == 2
+        production_elapsed = production_ticks[1] - production_ticks[0]
+        rate = (total - 1) / (production_elapsed / 1_000_000_000)
         p99_index = (len(latencies_ns) * 99 + 99) // 100 - 1
         p99_nanoseconds = sorted(latencies_ns)[p99_index]
         print(f"pipe ingestion: {rate:.0f} events/s, p99 {p99_nanoseconds / 1_000_000:.3f} ms")
         assert rate >= 1_000.0
         assert p99_nanoseconds < 5_000_000
     finally:
-        sys.setswitchinterval(previous_switch_interval)
+        if producer.is_alive():
+            producer.terminate()
+            producer.join(5.0)
         server.stop()
         assert not server._thread or not server._thread.is_alive()
