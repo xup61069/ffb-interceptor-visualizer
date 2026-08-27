@@ -19,6 +19,7 @@ dev = [
   "ruff>=0.8,<1",
   "ty>=0.0.1",
   "pip-audit>=2.7,<3",
+  "pyinstaller>=6.11,<7",
 ]
 
 [project.scripts]
