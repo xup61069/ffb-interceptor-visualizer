@@ -66,6 +66,9 @@ def _produce_frames(total: int) -> None:
         for sequence in range(1, total + 1):
             timestamp = time.perf_counter_ns()
             _write(writer, frame_bytes(sequence=sequence, qpc_ticks=timestamp))
+            # Keep the producer above the 1 kHz gate without creating an
+            # unrepresentative burst that can backlog a hosted runner.
+            time.sleep(0.0002)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="uses the production Windows named pipe")
