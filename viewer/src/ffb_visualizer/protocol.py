@@ -76,7 +76,7 @@ class Frame:
 
     @property
     def relative_seconds(self) -> float:
-        return self.qpc_ticks / 1_000_000_000
+        return self.qpc_ticks / (self.qpc_frequency or 1_000_000_000)
 
 
 def _u32(data: bytes | bytearray, offset: int) -> int:
