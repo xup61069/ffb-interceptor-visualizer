@@ -17,6 +17,7 @@ class PipeServer:
     """Accept multiple proxy instances without blocking the Qt thread."""
 
     _MAX_CLIENTS = 32
+    _READ_CHUNK_SIZE = 4 * 1024
 
     def __init__(self, on_frame: Callable[[object], None]) -> None:
         self._on_frame = on_frame
@@ -171,7 +172,11 @@ class PipeServer:
         buf = bytearray()
         try:
             while not self._stop.is_set():
-                status, chunk = win32file.ReadFile(handle, 64 * 1024)  # ty: ignore[unresolved-attribute]
+                # Small bounded reads prevent the tail of a high-rate batch
+                # from waiting behind a 64 KiB user-space parse batch.
+                status, chunk = win32file.ReadFile(  # ty: ignore[unresolved-attribute]
+                    handle, self._READ_CHUNK_SIZE
+                )
                 if status or not chunk:
                     break
                 buf.extend(chunk)
