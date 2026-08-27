@@ -32,11 +32,19 @@ extern "C" HRESULT WINAPI DirectInput8Create(HINSTANCE instance, DWORD version,
     if (riid == IID_IDirectInput8W) {
         auto* wrapped = new (std::nothrow) WrapperDirectInput8W(
             static_cast<IDirectInput8W*>(*out));
-        if (wrapped) *out = static_cast<IDirectInput8W*>(wrapped);
+        if (wrapped && wrapped->valid()) {
+            *out = static_cast<IDirectInput8W*>(wrapped);
+        } else {
+            delete wrapped;
+        }
     } else if (riid == IID_IDirectInput8A) {
         auto* wrapped = new (std::nothrow) WrapperDirectInput8A(
             static_cast<IDirectInput8A*>(*out));
-        if (wrapped) *out = static_cast<IDirectInput8A*>(wrapped);
+        if (wrapped && wrapped->valid()) {
+            *out = static_cast<IDirectInput8A*>(wrapped);
+        } else {
+            delete wrapped;
+        }
     }
     return hr;
 }

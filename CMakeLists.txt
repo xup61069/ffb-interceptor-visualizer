@@ -66,4 +66,22 @@ if(BUILD_TESTING)
     endif()
     target_link_libraries(ffb_wrapper_tests PRIVATE ole32 dxguid)
     add_test(NAME ffb_wrapper_tests COMMAND ffb_wrapper_tests)
+
+    add_executable(ffb_dinput_wrapper_tests
+        tests/cpp/dinput_wrapper_tests.cpp
+        src/wrapper_dinput8.cpp
+        src/wrapper_device8.cpp
+        src/wrapper_effect.cpp
+        src/telemetry_protocol.cpp
+        src/telemetry.cpp
+    )
+    target_include_directories(ffb_dinput_wrapper_tests PRIVATE src)
+    target_compile_definitions(ffb_dinput_wrapper_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if (MSVC)
+        target_compile_options(ffb_dinput_wrapper_tests PRIVATE /W4 /WX /EHsc)
+    else()
+        target_compile_options(ffb_dinput_wrapper_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+    target_link_libraries(ffb_dinput_wrapper_tests PRIVATE ole32 dxguid)
+    add_test(NAME ffb_dinput_wrapper_tests COMMAND ffb_dinput_wrapper_tests)
 endif()

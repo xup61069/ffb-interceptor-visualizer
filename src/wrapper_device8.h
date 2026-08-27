@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <type_traits>
 
+struct WrapperDevice8State;
+
 template<bool Unicode>
 class WrapperDevice8 final
     : public std::conditional_t<Unicode, IDirectInputDevice8W, IDirectInputDevice8A> {
@@ -23,6 +25,7 @@ public:
 
     WrapperDevice8(Base* real, std::uint32_t device_id);
     ~WrapperDevice8();
+    bool valid() const noexcept { return m_state != nullptr; }
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void**) override;
     ULONG STDMETHODCALLTYPE AddRef() override;
@@ -58,9 +61,14 @@ public:
     HRESULT STDMETHODCALLTYPE WriteEffectToFile(const Char*, DWORD, LPDIFILEEFFECT, DWORD) override;
 
 private:
+    friend struct WrapperDevice8State;
+    template<bool>
+    friend class WrapperDevice8;
+    WrapperDevice8(WrapperDevice8State* state, Base* real, std::uint32_t device_id);
+
     Base* m_real = nullptr;
     std::uint32_t m_device_id = 0;
-    volatile LONG m_ref_count = 1;
+    WrapperDevice8State* m_state = nullptr;
 };
 
 using WrapperDevice8A = WrapperDevice8<false>;

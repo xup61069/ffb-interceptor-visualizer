@@ -33,9 +33,9 @@ Ninja. From a Visual Studio developer prompt:
 
 ```powershell
 cmake --preset msvc-x64-release
-cmake --build --preset x64-release --target dinput8 ffb_protocol_tests ffb_wrapper_tests
+cmake --build --preset x64-release --target dinput8 ffb_protocol_tests ffb_wrapper_tests ffb_dinput_wrapper_tests
 cmake --preset msvc-x86-release   # run from a -arch=x86 prompt
-cmake --build --preset x86-release --target dinput8
+cmake --build --preset x86-release --target dinput8 ffb_protocol_tests ffb_wrapper_tests ffb_dinput_wrapper_tests
 ctest --test-dir build/x64-release --output-on-failure
 ```
 

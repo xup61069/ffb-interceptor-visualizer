@@ -43,23 +43,89 @@ void emit_property(std::uint32_t device_id, REFGUID property,
 
 }  // namespace
 
-template<bool U>
-WrapperDevice8<U>::WrapperDevice8(Base* real, std::uint32_t device_id)
-    : m_real(real), m_device_id(device_id) {}
+struct WrapperDevice8State {
+    volatile LONG ref_count = 1;
+    IDirectInputDevice8A* real_a = nullptr;
+    IDirectInputDevice8W* real_w = nullptr;
+    WrapperDevice8A* wrapper_a = nullptr;
+    WrapperDevice8W* wrapper_w = nullptr;
+
+    ~WrapperDevice8State() {
+        delete wrapper_a;
+        delete wrapper_w;
+        if (real_a) real_a->Release();
+        if (real_w) real_w->Release();
+    }
+
+    void* canonical_unknown() const noexcept {
+        if (wrapper_a) return static_cast<IDirectInputDevice8A*>(wrapper_a);
+        return static_cast<IDirectInputDevice8W*>(wrapper_w);
+    }
+
+    ULONG add_ref() noexcept {
+        return static_cast<ULONG>(InterlockedIncrement(&ref_count));
+    }
+
+    ULONG release() noexcept {
+        const ULONG count = static_cast<ULONG>(InterlockedDecrement(&ref_count));
+        if (count == 0) delete this;
+        return count;
+    }
+};
 
 template<bool U>
-WrapperDevice8<U>::~WrapperDevice8() {
-    if (m_real) m_real->Release();
+WrapperDevice8<U>::WrapperDevice8(Base* real, std::uint32_t device_id)
+    : m_real(real), m_device_id(device_id) {
+    m_state = new (std::nothrow) WrapperDevice8State();
+    if (!m_state) return;
+
+    if constexpr (U) {
+        m_state->real_w = static_cast<IDirectInputDevice8W*>(real);
+        m_state->wrapper_w = static_cast<WrapperDevice8W*>(this);
+        real->QueryInterface(IID_IDirectInputDevice8A,
+                             reinterpret_cast<void**>(&m_state->real_a));
+        if (m_state->real_a) {
+            m_state->wrapper_a = new (std::nothrow)
+                WrapperDevice8A(m_state, m_state->real_a, device_id);
+        }
+    } else {
+        m_state->real_a = static_cast<IDirectInputDevice8A*>(real);
+        m_state->wrapper_a = static_cast<WrapperDevice8A*>(this);
+        real->QueryInterface(IID_IDirectInputDevice8W,
+                             reinterpret_cast<void**>(&m_state->real_w));
+        if (m_state->real_w) {
+            m_state->wrapper_w = new (std::nothrow)
+                WrapperDevice8W(m_state, m_state->real_w, device_id);
+        }
+    }
 }
+
+template<bool U>
+WrapperDevice8<U>::WrapperDevice8(WrapperDevice8State* state, Base* real,
+                                  std::uint32_t device_id)
+    : m_real(real), m_device_id(device_id), m_state(state) {}
+
+template<bool U>
+WrapperDevice8<U>::~WrapperDevice8() = default;
 
 template<bool U>
 HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::QueryInterface(REFIID riid, void** out) {
     if (!out) return E_POINTER;
     *out = nullptr;
-    if (riid == IID_IUnknown ||
-        (U ? riid == IID_IDirectInputDevice8W : riid == IID_IDirectInputDevice8A)) {
-        *out = static_cast<Base*>(this);
-        AddRef();
+    if (!m_state) return E_NOINTERFACE;
+    if (riid == IID_IUnknown) {
+        *out = m_state->canonical_unknown();
+        m_state->add_ref();
+        return S_OK;
+    }
+    if (riid == IID_IDirectInputDevice8A && m_state->wrapper_a) {
+        *out = static_cast<IDirectInputDevice8A*>(m_state->wrapper_a);
+        m_state->add_ref();
+        return S_OK;
+    }
+    if (riid == IID_IDirectInputDevice8W && m_state->wrapper_w) {
+        *out = static_cast<IDirectInputDevice8W*>(m_state->wrapper_w);
+        m_state->add_ref();
         return S_OK;
     }
     return m_real ? m_real->QueryInterface(riid, out) : E_NOINTERFACE;
@@ -67,14 +133,12 @@ HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::QueryInterface(REFIID riid, void** 
 
 template<bool U>
 ULONG STDMETHODCALLTYPE WrapperDevice8<U>::AddRef() {
-    return static_cast<ULONG>(InterlockedIncrement(&m_ref_count));
+    return m_state ? m_state->add_ref() : 0;
 }
 
 template<bool U>
 ULONG STDMETHODCALLTYPE WrapperDevice8<U>::Release() {
-    const ULONG count = static_cast<ULONG>(InterlockedDecrement(&m_ref_count));
-    if (count == 0) delete this;
-    return count;
+    return m_state ? m_state->release() : 0;
 }
 
 template<bool U>

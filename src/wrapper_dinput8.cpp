@@ -68,23 +68,89 @@ void emit_device(std::uint32_t id, REFGUID guid, HRESULT hr,
 
 }  // namespace
 
-template<bool U>
-WrapperDirectInput8<U>::WrapperDirectInput8(Base* real) : m_real(real) {}
+struct WrapperDirectInput8State {
+    volatile LONG ref_count = 1;
+    IDirectInput8A* real_a = nullptr;
+    IDirectInput8W* real_w = nullptr;
+    WrapperDirectInput8A* wrapper_a = nullptr;
+    WrapperDirectInput8W* wrapper_w = nullptr;
+
+    ~WrapperDirectInput8State() {
+        delete wrapper_a;
+        delete wrapper_w;
+        if (real_a) real_a->Release();
+        if (real_w) real_w->Release();
+    }
+
+    void* canonical_unknown() const noexcept {
+        if (wrapper_a) return static_cast<IDirectInput8A*>(wrapper_a);
+        return static_cast<IDirectInput8W*>(wrapper_w);
+    }
+
+    ULONG add_ref() noexcept {
+        return static_cast<ULONG>(InterlockedIncrement(&ref_count));
+    }
+
+    ULONG release() noexcept {
+        const ULONG count = static_cast<ULONG>(InterlockedDecrement(&ref_count));
+        if (count == 0) delete this;
+        return count;
+    }
+};
 
 template<bool U>
-WrapperDirectInput8<U>::~WrapperDirectInput8() {
-    if (m_real) m_real->Release();
+WrapperDirectInput8<U>::WrapperDirectInput8(Base* real) : m_real(real) {
+    m_state = new (std::nothrow) WrapperDirectInput8State();
+    if (!m_state) return;
+
+    if constexpr (U) {
+        m_state->real_w = static_cast<IDirectInput8W*>(real);
+        m_state->wrapper_w = static_cast<WrapperDirectInput8W*>(this);
+        real->QueryInterface(IID_IDirectInput8A,
+                             reinterpret_cast<void**>(&m_state->real_a));
+        if (m_state->real_a) {
+            m_state->wrapper_a =
+                new (std::nothrow) WrapperDirectInput8A(m_state, m_state->real_a);
+        }
+    } else {
+        m_state->real_a = static_cast<IDirectInput8A*>(real);
+        m_state->wrapper_a = static_cast<WrapperDirectInput8A*>(this);
+        real->QueryInterface(IID_IDirectInput8W,
+                             reinterpret_cast<void**>(&m_state->real_w));
+        if (m_state->real_w) {
+            m_state->wrapper_w =
+                new (std::nothrow) WrapperDirectInput8W(m_state, m_state->real_w);
+        }
+    }
 }
+
+template<bool U>
+WrapperDirectInput8<U>::WrapperDirectInput8(WrapperDirectInput8State* state,
+                                             Base* real)
+    : m_real(real), m_state(state) {}
+
+template<bool U>
+WrapperDirectInput8<U>::~WrapperDirectInput8() = default;
 
 template<bool U>
 HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::QueryInterface(REFIID riid,
                                                                    void** out) {
     if (!out) return E_POINTER;
     *out = nullptr;
-    if (riid == IID_IUnknown ||
-        (U ? riid == IID_IDirectInput8W : riid == IID_IDirectInput8A)) {
-        *out = static_cast<Base*>(this);
-        AddRef();
+    if (!m_state) return E_NOINTERFACE;
+    if (riid == IID_IUnknown) {
+        *out = m_state->canonical_unknown();
+        m_state->add_ref();
+        return S_OK;
+    }
+    if (riid == IID_IDirectInput8A && m_state->wrapper_a) {
+        *out = static_cast<IDirectInput8A*>(m_state->wrapper_a);
+        m_state->add_ref();
+        return S_OK;
+    }
+    if (riid == IID_IDirectInput8W && m_state->wrapper_w) {
+        *out = static_cast<IDirectInput8W*>(m_state->wrapper_w);
+        m_state->add_ref();
         return S_OK;
     }
     return m_real ? m_real->QueryInterface(riid, out) : E_NOINTERFACE;
@@ -92,14 +158,12 @@ HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::QueryInterface(REFIID riid,
 
 template<bool U>
 ULONG STDMETHODCALLTYPE WrapperDirectInput8<U>::AddRef() {
-    return static_cast<ULONG>(InterlockedIncrement(&m_ref_count));
+    return m_state ? m_state->add_ref() : 0;
 }
 
 template<bool U>
 ULONG STDMETHODCALLTYPE WrapperDirectInput8<U>::Release() {
-    const ULONG count = static_cast<ULONG>(InterlockedDecrement(&m_ref_count));
-    if (count == 0) delete this;
-    return count;
+    return m_state ? m_state->release() : 0;
 }
 
 template<bool U>

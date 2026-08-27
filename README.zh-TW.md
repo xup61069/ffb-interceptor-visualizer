@@ -25,6 +25,9 @@ Ramp／Periodic 通道切換、暫停、事件標記與原始參數面板。資�
 保存。`.ffbtrace` 是版本化格式，只含相對時間、行程內 stable ID 與已遮罩的命令
 欄位，不含完整路徑、序號、帳號或主機名。
 
+proxy 的 A/W COM 介面共用控制區塊，跨介面 `QueryInterface(IUnknown)`、AddRef
+與 Release 維持同一個 identity 與 refcount；aggregation 與未知介面則原樣轉發。
+
 建置與執行指令請見英文 [README.md](README.md)。協定、安全模型與貢獻規範分別見
 [docs/protocol-v1.md](docs/protocol-v1.md)、[docs/security-model.md](docs/security-model.md)、
 [docs/trace-format.md](docs/trace-format.md)、[CONTRIBUTING.md](CONTRIBUTING.md)。

@@ -6,6 +6,8 @@
 #include <dinput.h>
 #include <type_traits>
 
+struct WrapperDirectInput8State;
+
 template<bool Unicode>
 class WrapperDirectInput8 final
     : public std::conditional_t<Unicode, IDirectInput8W, IDirectInput8A> {
@@ -20,6 +22,7 @@ public:
 
     explicit WrapperDirectInput8(Base* real);
     ~WrapperDirectInput8();
+    bool valid() const noexcept { return m_state != nullptr; }
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void**) override;
     ULONG STDMETHODCALLTYPE AddRef() override;
     ULONG STDMETHODCALLTYPE Release() override;
@@ -33,8 +36,13 @@ public:
     HRESULT STDMETHODCALLTYPE ConfigureDevices(LPDICONFIGUREDEVICESCALLBACK, CfgDevParamsT*, DWORD, LPVOID) override;
 
 private:
+    friend struct WrapperDirectInput8State;
+    template<bool>
+    friend class WrapperDirectInput8;
+    WrapperDirectInput8(WrapperDirectInput8State* state, Base* real);
+
     Base* m_real = nullptr;
-    volatile LONG m_ref_count = 1;
+    WrapperDirectInput8State* m_state = nullptr;
 };
 
 using WrapperDirectInput8A = WrapperDirectInput8<false>;
