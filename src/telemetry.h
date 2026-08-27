@@ -25,6 +25,13 @@ public:
     std::uint32_t next_device_id() noexcept;
     std::uint32_t next_effect_id() noexcept;
 
+#if defined(FFB_TESTING)
+    bool begin_benchmark_for_test() noexcept;
+    std::size_t drain_for_test() noexcept;
+    std::uint64_t dropped_for_test() const noexcept;
+    void end_benchmark_for_test() noexcept;
+#endif
+
 private:
     static constexpr std::size_t kQueueCapacity = 1024;
 

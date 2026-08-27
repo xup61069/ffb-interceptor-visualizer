@@ -9,6 +9,10 @@
 namespace ffb {
 namespace {
 
+#ifndef FFB_BUILD_VERSION
+#define FFB_BUILD_VERSION "0.0.0-dev"
+#endif
+
 constexpr wchar_t kPipeName[] = L"\\\\.\\pipe\\ffb-interceptor-v1";
 
 Telemetry::Node* node_from_entry(PSLIST_ENTRY entry) {
@@ -95,6 +99,50 @@ std::uint32_t Telemetry::next_effect_id() noexcept {
     return static_cast<std::uint32_t>(InterlockedIncrement(&m_next_effect));
 }
 
+#if defined(FFB_TESTING)
+bool Telemetry::begin_benchmark_for_test() noexcept {
+    bool expected = false;
+    if (!m_running.compare_exchange_strong(expected, true,
+                                           std::memory_order_acq_rel)) {
+        return false;
+    }
+    m_wake = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!m_wake) {
+        m_running.store(false, std::memory_order_release);
+        return false;
+    }
+    InterlockedExchange64(&m_sequence, 0);
+    InterlockedExchange64(&m_dropped, 0);
+    return true;
+}
+
+std::size_t Telemetry::drain_for_test() noexcept {
+    std::size_t count = 0;
+    PSLIST_ENTRY list = InterlockedFlushSList(&m_pending);
+    while (list) {
+        PSLIST_ENTRY next = list->Next;
+        InterlockedPushEntrySList(&m_free, list);
+        list = next;
+        ++count;
+    }
+    return count;
+}
+
+std::uint64_t Telemetry::dropped_for_test() const noexcept {
+    return static_cast<std::uint64_t>(
+        InterlockedCompareExchange64(const_cast<volatile LONG64*>(&m_dropped), 0, 0));
+}
+
+void Telemetry::end_benchmark_for_test() noexcept {
+    m_running.store(false, std::memory_order_release);
+    drain_for_test();
+    if (m_wake) {
+        CloseHandle(m_wake);
+        m_wake = nullptr;
+    }
+}
+#endif
+
 DWORD WINAPI Telemetry::thread_entry(void* context) {
     static_cast<Telemetry*>(context)->run();
     ExitThread(0);
@@ -111,7 +159,8 @@ Event Telemetry::hello_event() const noexcept {
     event.type = MessageType::Hello;
     event.process_id = GetCurrentProcessId();
     event.qpc_frequency = qpc_frequency();
-    std::snprintf(event.build_version, sizeof(event.build_version), "0.1.0");
+    std::snprintf(event.build_version, sizeof(event.build_version), "%s",
+                  FFB_BUILD_VERSION);
     std::snprintf(event.session_id, sizeof(event.session_id), "%lu-%llu",
                   static_cast<unsigned long>(event.process_id),
                   static_cast<unsigned long long>(qpc_now()));

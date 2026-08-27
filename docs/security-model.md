@@ -1,8 +1,9 @@
 # Security model
 
 The viewer creates a local named pipe with a DACL for the current interactive
-user and `PIPE_REJECT_REMOTE_CLIENTS`. On `Hello`, it may compare the claimed
-PID with `GetNamedPipeClientProcessId`. This prevents remote clients and other
+user and `PIPE_REJECT_REMOTE_CLIENTS`. On the mandatory first `Hello`, it
+compares the claimed PID with `GetNamedPipeClientProcessId` whenever the API is
+available. This prevents remote clients and other
 users in normal configurations; each connection must begin with a matching
 `Hello`, and the server bounds active client readers. A process running as the
 same user can still impersonate a proxy, so the pipe is telemetry, not an

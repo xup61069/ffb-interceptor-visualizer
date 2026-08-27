@@ -1,6 +1,14 @@
 $ErrorActionPreference = 'Stop'
 $root = (Get-Location).Path
-New-Item -ItemType Directory -Force -Path release | Out-Null
+$releaseDirectory = Join-Path $root 'release'
+if (Test-Path -LiteralPath $releaseDirectory) {
+    $resolvedRelease = (Resolve-Path -LiteralPath $releaseDirectory).Path
+    if ([System.IO.Path]::GetFullPath($resolvedRelease) -ne [System.IO.Path]::GetFullPath($releaseDirectory)) {
+        throw "Refusing to replace unexpected release directory: $resolvedRelease"
+    }
+    Remove-Item -LiteralPath $releaseDirectory -Recurse -Force
+}
+New-Item -ItemType Directory -Path $releaseDirectory | Out-Null
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
 $vsroot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 $devcmd = Join-Path $vsroot 'Common7/Tools/VsDevCmd.bat'
@@ -15,7 +23,8 @@ uv run cyclonedx-py environment --pyproject pyproject.toml --output-reproducible
 Compress-Archive -Path dist/ffb-viewer -DestinationPath ../release/ffb-viewer-x64.zip -Force
 Pop-Location
 if (-not $env:RELEASE_TAG) { $env:RELEASE_TAG = 'local' }
-git archive --format=zip --output="release/ffb-interceptor-visualizer-$($env:RELEASE_TAG)-source.zip" HEAD
+$archiveRef = if ($env:RELEASE_TAG -eq 'local') { 'HEAD' } else { $env:RELEASE_TAG }
+git archive --format=zip --output="release/ffb-interceptor-visualizer-$($env:RELEASE_TAG)-source.zip" $archiveRef
 $checksums = Get-ChildItem release -File |
     Get-FileHash -Algorithm SHA256 |
     ForEach-Object { "$($_.Hash)  $([System.IO.Path]::GetFileName($_.Path))" }

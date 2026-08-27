@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing or new release tag to package
+        description: Existing release tag to package
         required: true
         type: string
 
@@ -24,8 +24,12 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Verify release tag and versions
+        shell: pwsh
+        run: .github/scripts/verify-release-ref.ps1
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
         with:
           python-version: '3.13'
@@ -39,10 +43,16 @@ jobs:
         with:
           subject-path: release/*
       - name: Create unsigned experimental release
-        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: "${{ env.RELEASE_TAG }} — UNSIGNED EXPERIMENTAL"
-          prerelease: true
-          body: "UNSIGNED EXPERIMENTAL — command telemetry only; not motor torque."
-          files: release/*
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = @(Get-ChildItem -LiteralPath release -File | ForEach-Object FullName)
+          gh release view "$env:RELEASE_TAG" --repo "$env:GITHUB_REPOSITORY" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload "$env:RELEASE_TAG" $assets --clobber --repo "$env:GITHUB_REPOSITORY"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            gh release edit "$env:RELEASE_TAG" --title "$env:RELEASE_TAG — UNSIGNED EXPERIMENTAL" --prerelease --notes "UNSIGNED EXPERIMENTAL — command telemetry only; not motor torque." --repo "$env:GITHUB_REPOSITORY"
+            exit $LASTEXITCODE
+          }
+          gh release create "$env:RELEASE_TAG" $assets --title "$env:RELEASE_TAG — UNSIGNED EXPERIMENTAL" --prerelease --notes "UNSIGNED EXPERIMENTAL — command telemetry only; not motor torque." --repo "$env:GITHUB_REPOSITORY"

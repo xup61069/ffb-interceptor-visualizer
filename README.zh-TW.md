@@ -5,7 +5,7 @@
 轉發。圖表的 **Command Peak/RMS** 只代表選定 API 通道的命令值，不是方向盤
 馬達扭力量測。
 
-v0.1.0 提供 C++17 的 x86/x64 `dinput8.dll` proxy，以及 Python 3.12+、
+v0.1.1 提供 C++17 的 x86/x64 `dinput8.dll` proxy，以及 Python 3.12+、
 PySide6/pyqtgraph 的 x64 viewer。proxy 源自
 [walmis/dcs-force-feedback-fix](https://github.com/walmis/dcs-force-feedback-fix)
 v0.2（MIT）並保留完整歷史；新增程式採 GPL-3.0-only。
@@ -27,6 +27,16 @@ Ramp／Periodic 通道切換、暫停、事件標記與原始參數面板。資�
 
 proxy 的 A/W COM 介面共用控制區塊，跨介面 `QueryInterface(IUnknown)`、AddRef
 與 Release 維持同一個 identity 與 refcount；aggregation 與未知介面則原樣轉發。
+
+Windows CI 會測試 x86／x64 proxy 與 Python 3.12／3.13。合成門檻要求 proxy
+queue hot path 在每秒 1,000+ 事件時 p99 小於 100 微秒、Named Pipe ingestion
+p99 小於 5 毫秒，並確認 Qt 計時器以 60 Hz 更新且介面路徑保有至少 30 FPS
+frame budget。pipe 測試使用實際 current-user DACL、fragmented 寫入、重連與
+kernel 回報的 Hello PID 驗證。
+
+release 只會由既有 `vX.Y.Z` tag 建置：CI 會 checkout 該 tag，確認 tag commit
+及兩個 package 版本，再產生 archive 與 provenance attestation。詳見
+[docs/release-process.md](docs/release-process.md)。
 
 建置與執行指令請見英文 [README.md](README.md)。協定、安全模型與貢獻規範分別見
 [docs/protocol-v1.md](docs/protocol-v1.md)、[docs/security-model.md](docs/security-model.md)、

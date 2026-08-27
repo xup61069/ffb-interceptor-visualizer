@@ -19,7 +19,9 @@ from .trace import trace_payload
 
 
 class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self) -> None:
+    _MAX_PENDING_PER_REFRESH = 4_096
+
+    def __init__(self, *, start_server: bool = True) -> None:
         super().__init__()
         self.setWindowTitle("FFB Interceptor Visualizer — command monitor")
         self.resize(1100, 700)
@@ -85,7 +87,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.timer = QtCore.QTimer(self)
         self.timer.timeout.connect(self._refresh)
         self.timer.start(16)
-        self.server.start()
+        if start_server:
+            self.server.start()
 
     @QtCore.Slot(object)
     def _enqueue(self, frame: object) -> None:
@@ -96,7 +99,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.store.dropped += 1
 
     def _refresh(self) -> None:
-        while True:
+        for _ in range(self._MAX_PENDING_PER_REFRESH):
             try:
                 frame = self.pending.get_nowait()
             except Empty:

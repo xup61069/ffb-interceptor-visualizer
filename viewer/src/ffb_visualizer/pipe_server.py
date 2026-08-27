@@ -24,6 +24,8 @@ class PipeServer:
         self._thread: threading.Thread | None = None
         self._clients: set[threading.Thread] = set()
         self._clients_lock = threading.Lock()
+        self._listener_lock = threading.Lock()
+        self._listener: object | None = None
         self.errors = 0
 
     def start(self) -> None:
@@ -36,7 +38,53 @@ class PipeServer:
     def stop(self) -> None:
         self._stop.set()
         if self._thread:
-            self._thread.join(timeout=1.0)
+            # A stop can race the small gap before _run registers a listener.
+            # Retrying the local wake keeps shutdown deterministic without
+            # exposing the pipe beyond the current-user DACL.
+            for _ in range(4):
+                self._wake_listener()
+                self._thread.join(timeout=0.25)
+                if not self._thread.is_alive():
+                    break
+
+    def _set_listener(self, handle: object) -> None:
+        with self._listener_lock:
+            self._listener = handle
+
+    def _clear_listener(self, handle: object) -> None:
+        with self._listener_lock:
+            if self._listener == handle:
+                self._listener = None
+
+    def _wake_listener(self) -> None:
+        """Wake a synchronous ConnectNamedPipe so stop() cannot leave it alive."""
+        if os.name != "nt":
+            return
+        with self._listener_lock:
+            if self._listener is None:
+                return
+        try:
+            import pywintypes
+        except ImportError:
+            return
+        try:
+            import win32con
+            import win32file  # ty: ignore[unresolved-import]
+
+            handle = win32file.CreateFile(
+                PIPE_NAME,
+                win32con.GENERIC_WRITE,
+                0,
+                None,
+                win32con.OPEN_EXISTING,
+                0,
+                None,
+            )
+            win32file.CloseHandle(handle)
+        except (ImportError, OSError, RuntimeError, pywintypes.error):
+            # Another client can win the short race; the accept loop observes
+            # the stop flag after either connection and closes its handle.
+            return
 
     def _run(self) -> None:
         if os.name != "nt":
@@ -75,14 +123,25 @@ class PipeServer:
                     250,
                     security,
                 )
+                self._set_listener(handle)
+                if self._stop.is_set():
+                    win32file.CloseHandle(handle)
+                    handle = None
+                    continue
                 try:
                     win32pipe.ConnectNamedPipe(handle, None)
                 except pywintypes.error as exc:
                     if getattr(exc, "winerror", None) != pipe_connected:
                         raise
+                self._clear_listener(handle)
+                if self._stop.is_set():
+                    win32file.CloseHandle(handle)
+                    handle = None
+                    continue
                 with self._clients_lock:
                     if len(self._clients) >= self._MAX_CLIENTS:
                         win32file.CloseHandle(handle)
+                        handle = None
                         self.errors += 1
                         continue
                 client = threading.Thread(
@@ -94,15 +153,19 @@ class PipeServer:
                 with self._clients_lock:
                     self._clients.add(client)
                 client.start()
-            except (OSError, RuntimeError):
+                handle = None  # Ownership moved to _read_client.
+            except (OSError, RuntimeError, pywintypes.error):
                 self.errors += 1
                 if handle is not None:
+                    self._clear_listener(handle)
                     try:
                         win32file.CloseHandle(handle)
-                    except (OSError, RuntimeError):
+                    except (OSError, RuntimeError, pywintypes.error):
                         pass
 
     def _read_client(self, handle: int, win32file: object) -> None:
+        import pywintypes
+
         client_pid = _client_pid(handle)
         first_frame = True
         buf = bytearray()
@@ -114,16 +177,24 @@ class PipeServer:
                 buf.extend(chunk)
                 try:
                     for frame in iter_frames(buf):
-                        if first_frame:
-                            if frame.message_type != 1:
-                                raise ProtocolError("first frame must be Hello")
-                            if client_pid and frame.process_id != client_pid:
-                                raise ProtocolError("Hello PID does not match pipe client")
+                        if first_frame and frame.message_type != 1:
+                            raise ProtocolError("first frame must be Hello")
+                        if first_frame and client_pid and frame.process_id != client_pid:
+                            raise ProtocolError("Hello PID does not match pipe client")
                         first_frame = False
-                        self._on_frame(frame)
+                        try:
+                            self._on_frame(frame)
+                        except Exception:  # noqa: BLE001 - isolate UI callbacks from the pipe reader.
+                            self.errors += 1
+                            return
                 except ProtocolError:
                     self.errors += 1
                     break
+        except pywintypes.error as exc:
+            # ERROR_BROKEN_PIPE is the ordinary result when a proxy process
+            # exits or reconnects after it has sent complete frames.
+            if getattr(exc, "winerror", None) not in (109, 232):
+                self.errors += 1
         except (OSError, RuntimeError):
             self.errors += 1
         finally:
@@ -131,7 +202,7 @@ class PipeServer:
                 self.errors += 1
             try:
                 win32file.CloseHandle(handle)  # ty: ignore[unresolved-attribute]
-            except (OSError, RuntimeError):
+            except (OSError, RuntimeError, pywintypes.error):
                 pass
             with self._clients_lock:
                 self._clients.discard(threading.current_thread())
@@ -140,11 +211,16 @@ class PipeServer:
 def _security_attributes():
     """Restrict the pipe DACL to the interactive owner SID when pywin32 allows it."""
     try:
+        import pywintypes
+    except ImportError:
+        return None
+    try:
+        import win32api  # ty: ignore[unresolved-import]
         import win32con
         import win32security  # ty: ignore[unresolved-import]
 
         token = win32security.OpenProcessToken(
-            win32security.GetCurrentProcess(), win32security.TOKEN_QUERY
+            win32api.GetCurrentProcess(), win32security.TOKEN_QUERY
         )
         sid = win32security.GetTokenInformation(token, win32security.TokenUser)[0]
         descriptor = win32security.SECURITY_DESCRIPTOR()
@@ -155,7 +231,7 @@ def _security_attributes():
         attributes = win32security.SECURITY_ATTRIBUTES()
         attributes.SECURITY_DESCRIPTOR = descriptor
         return attributes
-    except (ImportError, OSError, RuntimeError, AttributeError):
+    except (ImportError, OSError, RuntimeError, AttributeError, pywintypes.error):
         return None
 
 

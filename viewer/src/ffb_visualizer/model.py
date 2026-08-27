@@ -15,6 +15,7 @@ from .protocol import Frame
 @dataclass(slots=True)
 class EventStore:
     capacity: int = 20_000
+    marker_capacity: int = 1_024
     events: deque[Frame] = field(init=False)
     paused: bool = field(init=False, default=False)
     received: int = field(init=False, default=0)
@@ -89,4 +90,6 @@ class EventStore:
         origin = self.events[0].qpc_ticks
         latest = self.events[-1]
         seconds = (latest.qpc_ticks - origin) / (self.qpc_frequency or 1_000_000_000)
+        if len(self.markers) >= self.marker_capacity:
+            del self.markers[: len(self.markers) - self.marker_capacity + 1]
         self.markers.append((seconds, label[:64]))

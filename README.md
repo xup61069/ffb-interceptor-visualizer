@@ -6,7 +6,7 @@ parameters in a live viewer. It forwards every DirectInput call and HRESULT
 unchanged. A graph labelled **Command Peak/RMS** describes the selected API
 channel; it is not a measurement of motor torque.
 
-Version 0.1.0 supports a C++17 `dinput8.dll` proxy for x86 and x64 and a
+Version 0.1.1 supports a C++17 `dinput8.dll` proxy for x86 and x64 and a
 Python 3.12+ x64 PySide6/pyqtgraph viewer. The proxy is derived from
 [walmis/dcs-force-feedback-fix](https://github.com/walmis/dcs-force-feedback-fix)
 v0.2 (MIT) and keeps its history. New code is GPL-3.0-only.
@@ -72,6 +72,20 @@ See [docs/protocol-v1.md](docs/protocol-v1.md) and
 [docs/security-model.md](docs/security-model.md). The user-triggered trace
 format is documented in [docs/trace-format.md](docs/trace-format.md).
 
+## Verification and release provenance
+
+The Windows CI matrix builds and tests both proxy architectures and Python
+3.12/3.13. Its deterministic synthetic gates require the proxy queue hot path
+to stay below 100 microseconds p99 at 1,000+ events/second, named-pipe
+ingestion below 5 milliseconds p99 at the same rate, and the Qt refresh path
+to remain below a 30 FPS frame budget while its timer runs at 60 Hz. The pipe
+tests use the actual current-user DACL, fragmented writes, reconnects and a
+kernel-reported Hello PID check.
+
+Releases are built only from an existing `vX.Y.Z` tag: CI checks out that tag,
+then verifies the tag commit and both package versions before building,
+archiving and attesting the assets. See [docs/release-process.md](docs/release-process.md).
+
 ## Contributing and licence
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and
@@ -82,7 +96,7 @@ and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Status
 
-v0.1.0 is a prerelease and is marked `UNSIGNED EXPERIMENTAL`. Synthetic
+v0.1.1 is a prerelease and is marked `UNSIGNED EXPERIMENTAL`. Synthetic
 protocol/queue tests are the release gate. Real hardware or commercial-game
 results are not compatibility claims unless accompanied by explicit
 authorization and reproducible evidence.
