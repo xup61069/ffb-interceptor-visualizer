@@ -42,8 +42,15 @@ class PipeServer:
         if os.name != "nt":
             self.errors += 1
             return
+        import pywintypes
         import win32file  # ty: ignore[unresolved-import]
         import win32pipe  # ty: ignore[unresolved-import]
+
+        # ERROR_PIPE_CONNECTED is a successful race: a client connected
+        # between CreateNamedPipe and ConnectNamedPipe.  pywin32 exposes it
+        # as an exception rather than a boolean result.
+        pipe_connected = 535
+        reject_remote = getattr(win32pipe, "PIPE_REJECT_REMOTE_CLIENTS", 0x00000008)
 
         while not self._stop.is_set():
             handle = None
@@ -54,14 +61,18 @@ class PipeServer:
                     win32pipe.PIPE_TYPE_BYTE
                     | win32pipe.PIPE_READMODE_BYTE
                     | win32pipe.PIPE_WAIT
-                    | getattr(win32pipe, "PIPE_REJECT_REMOTE_CLIENTS", 0),
+                    | reject_remote,
                     win32pipe.PIPE_UNLIMITED_INSTANCES,
                     64 * 1024,
                     64 * 1024,
                     250,
                     _security_attributes(),
                 )
-                win32pipe.ConnectNamedPipe(handle, None)
+                try:
+                    win32pipe.ConnectNamedPipe(handle, None)
+                except pywintypes.error as exc:
+                    if getattr(exc, "winerror", None) != pipe_connected:
+                        raise
                 with self._clients_lock:
                     if len(self._clients) >= self._MAX_CLIENTS:
                         win32file.CloseHandle(handle)
