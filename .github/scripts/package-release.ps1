@@ -16,4 +16,10 @@ Compress-Archive -Path dist/ffb-viewer -DestinationPath ../release/ffb-viewer-x6
 Pop-Location
 if (-not $env:RELEASE_TAG) { $env:RELEASE_TAG = 'local' }
 git archive --format=zip --output="release/ffb-interceptor-visualizer-$($env:RELEASE_TAG)-source.zip" HEAD
-Get-ChildItem release -File | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $($_.Path.Substring($root.Length + 1))" } | Set-Content release/SHA256SUMS
+$checksums = Get-ChildItem release -File |
+    Get-FileHash -Algorithm SHA256 |
+    ForEach-Object { "$($_.Hash)  $([System.IO.Path]::GetFileName($_.Path))" }
+[System.IO.File]::WriteAllLines(
+    (Join-Path $root 'release/SHA256SUMS'),
+    $checksums,
+    [System.Text.UTF8Encoding]::new($false))
