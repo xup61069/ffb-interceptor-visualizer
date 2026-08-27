@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 
 import pytest
 from PySide6 import QtTest
@@ -25,6 +26,25 @@ def test_condition_channel_is_plotted_without_fabricated_samples(qtbot) -> None:
     assert len(values) == 1
     assert "Condition offset" in window.status.text()
     assert "motor torque" not in window.status.text().lower()
+
+
+def test_device_and_effect_filters_are_scoped_to_producer(qtbot) -> None:
+    window = MainWindow(start_server=False)
+    qtbot.addWidget(window)
+    first = replace(frame(sequence=1, process_id=101), device_id=7, effect_id=9)
+    second = replace(frame(sequence=2, process_id=202), device_id=7, effect_id=9)
+    window.store.add(first)
+    window.store.add(second)
+    window._update_filters()
+
+    device_index = window.device_box.findData("101:7")
+    effect_index = window.effect_box.findData("101:9")
+    assert device_index >= 0
+    assert effect_index >= 0
+    window.device_box.setCurrentIndex(device_index)
+    assert window._visible_events() == [first]
+    window.effect_box.setCurrentIndex(effect_index)
+    assert window._visible_events() == [first]
 
 
 @pytest.mark.performance

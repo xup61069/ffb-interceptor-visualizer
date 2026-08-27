@@ -39,6 +39,12 @@ _CHANNEL_OPTIONS: tuple[tuple[str, str], ...] = (
 )
 
 
+def _scoped_id(process_id: int, object_id: int) -> str:
+    """Identify a process-local DirectInput object without retaining paths."""
+
+    return f"{process_id}:{object_id}"
+
+
 class MainWindow(QtWidgets.QMainWindow):
     _MAX_PENDING_PER_REFRESH = 4_096
 
@@ -174,9 +180,13 @@ class MainWindow(QtWidgets.QMainWindow):
         if producer is not None:
             events = [event for event in events if event.process_id == producer]
         if device is not None:
-            events = [event for event in events if event.device_id == device]
+            events = [
+                event for event in events if _scoped_id(event.process_id, event.device_id) == device
+            ]
         if effect is not None:
-            events = [event for event in events if event.effect_id == effect]
+            events = [
+                event for event in events if _scoped_id(event.process_id, event.effect_id) == effect
+            ]
         return events
 
     def _update_details(self, event: Frame | None) -> None:
@@ -225,8 +235,16 @@ class MainWindow(QtWidgets.QMainWindow):
         values = self.store.window(float(self.window_box.currentText()))
         choices = (
             (self.producer_box, "All producers", sorted({event.process_id for event in values})),
-            (self.device_box, "All devices", sorted({event.device_id for event in values})),
-            (self.effect_box, "All effects", sorted({event.effect_id for event in values})),
+            (
+                self.device_box,
+                "All devices",
+                sorted({_scoped_id(event.process_id, event.device_id) for event in values}),
+            ),
+            (
+                self.effect_box,
+                "All effects",
+                sorted({_scoped_id(event.process_id, event.effect_id) for event in values}),
+            ),
         )
         for box, label, ids in choices:
             selected = box.currentData()
@@ -234,7 +252,17 @@ class MainWindow(QtWidgets.QMainWindow):
             box.clear()
             box.addItem(label, None)
             for value in ids:
-                box.addItem(str(value), value)
+                if box is self.producer_box:
+                    display = str(value)
+                elif box is self.device_box:
+                    assert isinstance(value, str)
+                    process_id, object_id = value.split(":", 1)
+                    display = f"PID {process_id} · device {object_id}"
+                else:
+                    assert isinstance(value, str)
+                    process_id, object_id = value.split(":", 1)
+                    display = f"PID {process_id} · effect {object_id}"
+                box.addItem(display, value)
             index = box.findData(selected)
             box.setCurrentIndex(max(index, 0))
             box.blockSignals(False)

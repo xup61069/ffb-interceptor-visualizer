@@ -18,4 +18,8 @@ deadband. Select a condition axis to inspect one of up to eight raw condition
 records. The graph never invents a condition-force sample when a frame does
 not carry the selected parameter.
 
+Device and effect selectors display `PID · stable ID` because those IDs are
+stable only within one producer process; selecting an object therefore cannot
+accidentally merge two producers that reused the same numeric ID.
+
 SPDX-License-Identifier: GPL-3.0-only
