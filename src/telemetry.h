@@ -42,6 +42,7 @@ private:
     HANDLE m_wake = nullptr;
     HANDLE m_thread = nullptr;
     std::atomic<bool> m_running{false};
+    std::atomic_flag m_starting = ATOMIC_FLAG_INIT;
     volatile LONG64 m_sequence = 0;
     volatile LONG64 m_dropped = 0;
     volatile LONG m_next_device = 0;

@@ -45,23 +45,32 @@ Telemetry::Telemetry() {
 
 void Telemetry::start() {
     if (m_running.load(std::memory_order_acquire)) return;
+    if (m_starting.test_and_set(std::memory_order_acquire)) return;
 
     // Keep the module mapped while the sender thread is alive. This avoids a
     // use-after-unload if a host calls FreeLibrary on its proxy explicitly.
     HMODULE self = nullptr;
-    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                           GET_MODULE_HANDLE_EX_FLAG_PIN,
-                       reinterpret_cast<LPCWSTR>(&Telemetry::instance), &self);
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                GET_MODULE_HANDLE_EX_FLAG_PIN,
+                            reinterpret_cast<LPCWSTR>(&Telemetry::instance), &self)) {
+        m_starting.clear(std::memory_order_release);
+        return;
+    }
 
     m_wake = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (!m_wake) return;
+    if (!m_wake) {
+        m_starting.clear(std::memory_order_release);
+        return;
+    }
     m_thread = CreateThread(nullptr, 0, &Telemetry::thread_entry, this, 0, nullptr);
     if (!m_thread) {
         CloseHandle(m_wake);
         m_wake = nullptr;
+        m_starting.clear(std::memory_order_release);
         return;
     }
     m_running.store(true, std::memory_order_release);
+    m_starting.clear(std::memory_order_release);
 }
 
 void Telemetry::emit(Event event) noexcept {

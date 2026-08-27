@@ -22,6 +22,7 @@ class EventStore:
     dropped: int = field(init=False, default=0)
     started: float = field(init=False, default=0.0)
     qpc_frequency: int = field(init=False, default=1_000_000_000)
+    markers: list[tuple[float, str]] = field(init=False)
 
     def __post_init__(self) -> None:
         self.events: deque[Frame] = deque(maxlen=self.capacity)
@@ -31,6 +32,7 @@ class EventStore:
         self.dropped = 0
         self.started = time.monotonic()
         self.qpc_frequency = 1_000_000_000
+        self.markers = []
 
     def add(self, frame: Frame) -> None:
         if self.paused:
@@ -51,18 +53,40 @@ class EventStore:
         cutoff = newest - int(seconds * self.qpc_frequency)
         return [event for event in self.events if event.qpc_ticks >= cutoff]
 
-    def command_peak_rms(self, seconds: float) -> tuple[float, float]:
+    def command_peak_rms(
+        self,
+        seconds: float,
+        events: list[Frame] | None = None,
+        channel: str = "magnitude",
+    ) -> tuple[float, float]:
         """Return time-weighted command peak/RMS for the selected window."""
-        events = self.window(seconds)
+        events = self.window(seconds) if events is None else events
         if not events:
             return 0.0, 0.0
-        peak = max(abs(event.magnitude) for event in events) / 10_000.0
+
+        def value(event: Frame) -> int:
+            if channel == "ramp_end":
+                return event.ramp_end
+            if channel == "periodic_magnitude":
+                return event.periodic_magnitude
+            return event.magnitude
+
+        peak = max(abs(value(event)) for event in events) / 10_000.0
         weighted = 0.0
         total = 0
         for previous, current in pairwise(events):
             delta = max(0, current.qpc_ticks - previous.qpc_ticks)
-            weighted += (previous.magnitude / 10_000.0) ** 2 * delta
+            weighted += (value(previous) / 10_000.0) ** 2 * delta
             total += delta
         if total == 0:
-            return peak, abs(events[-1].magnitude) / 10_000.0
+            return peak, abs(value(events[-1])) / 10_000.0
         return peak, math.sqrt(weighted / total)
+
+    def mark_latest(self, label: str = "marker") -> None:
+        """Record a user-created marker using relative, monotonic time only."""
+        if not self.events:
+            return
+        origin = self.events[0].qpc_ticks
+        latest = self.events[-1]
+        seconds = (latest.qpc_ticks - origin) / (self.qpc_frequency or 1_000_000_000)
+        self.markers.append((seconds, label[:64]))

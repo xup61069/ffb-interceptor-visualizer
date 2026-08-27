@@ -19,6 +19,12 @@ GPL 額外用途限制。
 資料夾若已有 `dinput8.dll`，絕對不要覆寫；先備份並在移除時還原原檔。啟動失敗時
 刪除本 proxy 與 viewer 即可回復系統 DLL。
 
+viewer 提供 producer／device／effect 篩選、1／5／10／30 秒視窗、Magnitude／
+Ramp／Periodic 通道切換、暫停、事件標記與原始參數面板。資料只留在有界記憶體
+佇列；按下 `Export CSV`、`Export PNG` 或 `Save .ffbtrace` 後才會由使用者主動
+保存。`.ffbtrace` 是版本化格式，只含相對時間、行程內 stable ID 與已遮罩的命令
+欄位，不含完整路徑、序號、帳號或主機名。
+
 建置與執行指令請見英文 [README.md](README.md)。協定、安全模型與貢獻規範分別見
 [docs/protocol-v1.md](docs/protocol-v1.md)、[docs/security-model.md](docs/security-model.md)、
-[CONTRIBUTING.md](CONTRIBUTING.md)。
+[docs/trace-format.md](docs/trace-format.md)、[CONTRIBUTING.md](CONTRIBUTING.md)。

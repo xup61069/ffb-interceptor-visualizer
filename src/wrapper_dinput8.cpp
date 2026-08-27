@@ -110,12 +110,18 @@ HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::CreateDevice(
     }
 
     const std::uint32_t device_id = ffb::Telemetry::instance().next_device_id();
-    if (U) {
-        emit_device(device_id, rguid, hr, product_name(
-            reinterpret_cast<IDirectInputDevice8W*>(real)));
-    } else {
-        emit_device(device_id, rguid, hr, product_name(
-            reinterpret_cast<IDirectInputDevice8A*>(real)));
+    try {
+        if (U) {
+            emit_device(device_id, rguid, hr, product_name(
+                reinterpret_cast<IDirectInputDevice8W*>(real)));
+        } else {
+            emit_device(device_id, rguid, hr, product_name(
+                reinterpret_cast<IDirectInputDevice8A*>(real)));
+        }
+    } catch (...) {
+        // Metadata is best-effort; allocation/encoding failures never alter
+        // the DirectInput result or prevent the game from receiving a device.
+        emit_device(device_id, rguid, hr, {});
     }
     auto* wrapped = new (std::nothrow) WrapperDevice8<U>(real, device_id);
     if (!wrapped) {

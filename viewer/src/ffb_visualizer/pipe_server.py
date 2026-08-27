@@ -16,10 +16,14 @@ PIPE_NAME = r"\\.\pipe\ffb-interceptor-v1"
 class PipeServer:
     """Accept multiple proxy instances without blocking the Qt thread."""
 
+    _MAX_CLIENTS = 32
+
     def __init__(self, on_frame: Callable[[object], None]) -> None:
         self._on_frame = on_frame
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._clients: set[threading.Thread] = set()
+        self._clients_lock = threading.Lock()
         self.errors = 0
 
     def start(self) -> None:
@@ -42,6 +46,7 @@ class PipeServer:
         import win32pipe  # ty: ignore[unresolved-import]
 
         while not self._stop.is_set():
+            handle = None
             try:
                 handle = win32pipe.CreateNamedPipe(
                     PIPE_NAME,
@@ -57,32 +62,61 @@ class PipeServer:
                     _security_attributes(),
                 )
                 win32pipe.ConnectNamedPipe(handle, None)
-                client_pid = _client_pid(handle)
-                first_frame = True
-                buf = bytearray()
-                while not self._stop.is_set():
-                    status, chunk = win32file.ReadFile(handle, 64 * 1024)
-                    if status or not chunk:
-                        break
-                    buf.extend(chunk)
-                    try:
-                        for frame in iter_frames(buf):
-                            if (
-                                first_frame
-                                and frame.message_type == 1
-                                and client_pid
-                                and frame.process_id != client_pid
-                            ):
-                                raise ProtocolError("Hello PID does not match pipe client")
-                            first_frame = False
-                            self._on_frame(frame)
-                    except ProtocolError:
+                with self._clients_lock:
+                    if len(self._clients) >= self._MAX_CLIENTS:
+                        win32file.CloseHandle(handle)
                         self.errors += 1
-                        buf.clear()
-                        break
-                win32file.CloseHandle(handle)
+                        continue
+                client = threading.Thread(
+                    target=self._read_client,
+                    args=(handle, win32file),
+                    name="ffb-pipe-client",
+                    daemon=True,
+                )
+                with self._clients_lock:
+                    self._clients.add(client)
+                client.start()
             except (OSError, RuntimeError):
                 self.errors += 1
+                if handle is not None:
+                    try:
+                        win32file.CloseHandle(handle)
+                    except (OSError, RuntimeError):
+                        pass
+
+    def _read_client(self, handle: int, win32file: object) -> None:
+        client_pid = _client_pid(handle)
+        first_frame = True
+        buf = bytearray()
+        try:
+            while not self._stop.is_set():
+                status, chunk = win32file.ReadFile(handle, 64 * 1024)  # ty: ignore[unresolved-attribute]
+                if status or not chunk:
+                    break
+                buf.extend(chunk)
+                try:
+                    for frame in iter_frames(buf):
+                        if first_frame:
+                            if frame.message_type != 1:
+                                raise ProtocolError("first frame must be Hello")
+                            if client_pid and frame.process_id != client_pid:
+                                raise ProtocolError("Hello PID does not match pipe client")
+                        first_frame = False
+                        self._on_frame(frame)
+                except ProtocolError:
+                    self.errors += 1
+                    break
+        except (OSError, RuntimeError):
+            self.errors += 1
+        finally:
+            if first_frame and not self._stop.is_set():
+                self.errors += 1
+            try:
+                win32file.CloseHandle(handle)  # ty: ignore[unresolved-attribute]
+            except (OSError, RuntimeError):
+                pass
+            with self._clients_lock:
+                self._clients.discard(threading.current_thread())
 
 
 def _security_attributes():

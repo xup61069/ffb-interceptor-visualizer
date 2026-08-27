@@ -54,9 +54,13 @@ uv run ffb-viewer
 
 The viewer owns the multi-instance named-pipe server
 `\\.\pipe\ffb-interceptor-v1`. Data stays in memory unless the user presses
-an export control. Exports contain relative time, executable basename, stable
-in-process IDs and command fields only; no full paths, serials, account names
-or host names.
+an export control. Use the producer/device/effect selectors, 1/5/10/30 second
+window, channel selector, pause and event marker controls to inspect a bounded
+rolling buffer. `Export CSV`, `Export PNG` and `Save .ffbtrace` are explicit
+user actions; the versioned trace contains relative time, stable in-process IDs
+and redacted command fields only (never full paths, serials, account names or
+host names). The raw-details pane shows the last selected command without
+inventing condition-force samples.
 
 ## Protocol
 
@@ -64,7 +68,8 @@ Protocol v1 uses an explicit little-endian 32-byte header and a bounded,
 pointer-free payload. Frames are limited to 64 KiB and eight axes. Unknown or
 custom effects carry only a GUID, declared length and redacted/truncated flag.
 See [docs/protocol-v1.md](docs/protocol-v1.md) and
-[docs/security-model.md](docs/security-model.md).
+[docs/security-model.md](docs/security-model.md). The user-triggered trace
+format is documented in [docs/trace-format.md](docs/trace-format.md).
 
 ## Contributing and licence
 
