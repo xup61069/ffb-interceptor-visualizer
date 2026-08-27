@@ -23,6 +23,12 @@ jobs:
       - uses: github/codeql-action/init@6f5948dfacef28e207b48d0905cf90c03365536d # v3
         with:
           languages: c-cpp, python
+      - name: Build C++ for CodeQL
+        shell: cmd
+        run: >-
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat"
+          -arch=x64 && cmake -S . -B build\codeql -G Ninja -DCMAKE_BUILD_TYPE=Release
+          && cmake --build build\codeql --target dinput8
       - uses: github/codeql-action/analyze@6f5948dfacef28e207b48d0905cf90c03365536d # v3
 
   dependency-audit:
