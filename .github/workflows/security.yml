@@ -71,3 +71,6 @@ jobs:
         run: actionlint
       - name: Audit workflow supply-chain policy
         run: zizmor --pedantic .github/workflows
+      - name: Audit SPDX license headers
+        shell: pwsh
+        run: .github/scripts/check-license-headers.ps1

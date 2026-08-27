@@ -12,6 +12,7 @@ viewer. Before opening a pull request run:
 cmake --build --preset x64-release --target ffb_protocol_tests dinput8
 ctest --test-dir build/x64-release --output-on-failure
 cd viewer; uv run ruff check .; uv run ty check src; uv run pytest
+.github/scripts/check-license-headers.ps1
 ```
 
 Commits follow the Developer Certificate of Origin. Add a `Signed-off-by:`

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-only
 $ErrorActionPreference = 'Stop'
 $root = (Get-Location).Path
 $releaseDirectory = Join-Path $root 'release'

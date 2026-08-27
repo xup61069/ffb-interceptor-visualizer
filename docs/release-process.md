@@ -31,6 +31,10 @@ offscreen mode before archiving it; a Viewer that exits during this smoke check
 cannot be published.
 The packaging script also inspects each ZIP and fails if the binary, GPL/MIT
 notices, third-party notice, or bilingual README entries are missing.
+The security workflow additionally runs
+`.github/scripts/check-license-headers.ps1`, which checks every tracked
+implementation/build file for an SPDX marker and verifies that the inherited
+wrapper files remain MIT while project-authored files remain GPL-3.0-only.
 
 The `Security analysis` workflow is a release prerequisite: its CodeQL and
 dependency jobs run alongside a full-history gitleaks scan and pinned
