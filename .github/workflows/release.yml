@@ -53,12 +53,26 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $notesPath = '.github/release-notes.md'
+          if (Test-Path -LiteralPath $notesPath) {
+            $notesTemplate = Get-Content -Raw -LiteralPath $notesPath
+            $releaseNotes = $notesTemplate.Replace('{{TAG}}', $env:RELEASE_TAG)
+          }
+          else {
+            # Older tags predate the versioned template; preserve an existing
+            # body when rerunning those releases instead of replacing it.
+            $releaseNotes = "UNSIGNED EXPERIMENTAL — command telemetry only; not motor torque."
+            $existingBody = gh release view "$env:RELEASE_TAG" --json body --jq .body --repo "$env:GITHUB_REPOSITORY" 2>$null
+            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingBody)) {
+              $releaseNotes = $existingBody
+            }
+          }
           $assets = @(Get-ChildItem -LiteralPath release -File | ForEach-Object FullName)
           gh release view "$env:RELEASE_TAG" --repo "$env:GITHUB_REPOSITORY" *> $null
           if ($LASTEXITCODE -eq 0) {
             gh release upload "$env:RELEASE_TAG" $assets --clobber --repo "$env:GITHUB_REPOSITORY"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            gh release edit "$env:RELEASE_TAG" --title "$env:RELEASE_TAG — UNSIGNED EXPERIMENTAL" --prerelease --notes "UNSIGNED EXPERIMENTAL — command telemetry only; not motor torque." --repo "$env:GITHUB_REPOSITORY"
+            gh release edit "$env:RELEASE_TAG" --title "$env:RELEASE_TAG — UNSIGNED EXPERIMENTAL" --prerelease --notes $releaseNotes --repo "$env:GITHUB_REPOSITORY"
             exit $LASTEXITCODE
           }
-          gh release create "$env:RELEASE_TAG" $assets --title "$env:RELEASE_TAG — UNSIGNED EXPERIMENTAL" --prerelease --notes "UNSIGNED EXPERIMENTAL — command telemetry only; not motor torque." --repo "$env:GITHUB_REPOSITORY"
+          gh release create "$env:RELEASE_TAG" $assets --title "$env:RELEASE_TAG — UNSIGNED EXPERIMENTAL" --prerelease --notes $releaseNotes --repo "$env:GITHUB_REPOSITORY"

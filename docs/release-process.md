@@ -9,6 +9,9 @@ The workflow produces x86/x64 proxy ZIP files, an x64 viewer ZIP, source ZIP,
 CycloneDX SBOM and `SHA256SUMS`. GitHub build provenance attests the generated
 files. Releases remain `UNSIGNED EXPERIMENTAL`; the checksums and attestation
 provide integrity/provenance evidence but are not an Authenticode signature.
+The body is rendered from `.github/release-notes.md` with the tag substituted
+for `{{TAG}}`, so rerunning a release workflow does not discard the safety and
+verification guidance.
 
 To reproduce a release from a clean clone:
 
