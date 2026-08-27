@@ -15,6 +15,8 @@ Highlights:
   being combined across producers.
 - Producer changes reset incompatible object selections, and zero sentinel IDs
   are omitted from the object lists.
+- Proxy and viewer archives include the GPL, upstream MIT, third-party notices,
+  and bilingual README files needed for manual installation and redistribution.
 - Command-channel selection, condition-axis inspection, time-weighted Command
   Peak/RMS, trace/CSV/PNG export, and redacted custom-effect handling.
 - CI validates proxy x86/x64 and viewer Python 3.12/3.13; clean-clone rebuilds

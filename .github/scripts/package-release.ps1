@@ -9,13 +9,38 @@ if (Test-Path -LiteralPath $releaseDirectory) {
     Remove-Item -LiteralPath $releaseDirectory -Recurse -Force
 }
 New-Item -ItemType Directory -Path $releaseDirectory | Out-Null
+$stageRoot = Join-Path $releaseDirectory '_stage'
+New-Item -ItemType Directory -Path $stageRoot | Out-Null
+
+function Add-ReleaseNotices {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Destination
+    )
+
+    Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $Destination 'LICENSE')
+    Copy-Item -LiteralPath (Join-Path $root 'THIRD_PARTY_NOTICES.md') -Destination (Join-Path $Destination 'THIRD_PARTY_NOTICES.md')
+    Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination (Join-Path $Destination 'README.md')
+    Copy-Item -LiteralPath (Join-Path $root 'README.zh-TW.md') -Destination (Join-Path $Destination 'README.zh-TW.md')
+    $licenseDirectory = Join-Path $Destination 'licenses'
+    New-Item -ItemType Directory -Path $licenseDirectory | Out-Null
+    Copy-Item -LiteralPath (Join-Path $root 'licenses/upstream-dcs-force-feedback-fix-MIT.txt') -Destination $licenseDirectory
+}
+
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
 $vsroot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 $devcmd = Join-Path $vsroot 'Common7/Tools/VsDevCmd.bat'
 cmd.exe /d /c "call `"$devcmd`" -arch=x64 >nul && cmake --preset msvc-x64-release && cmake --build --preset x64-release --target dinput8"
 cmd.exe /d /c "call `"$devcmd`" -arch=x86 >nul && cmake -S . -B build/x86-release -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build/x86-release --target dinput8"
-Compress-Archive -Path build/x64-release/dinput8.dll -DestinationPath release/ffb-proxy-x64.zip -Force
-Compress-Archive -Path build/x86-release/dinput8.dll -DestinationPath release/ffb-proxy-x86.zip -Force
+$proxyX64Stage = Join-Path $stageRoot 'ffb-proxy-x64'
+$proxyX86Stage = Join-Path $stageRoot 'ffb-proxy-x86'
+New-Item -ItemType Directory -Path $proxyX64Stage, $proxyX86Stage | Out-Null
+Copy-Item -LiteralPath build/x64-release/dinput8.dll -Destination $proxyX64Stage
+Copy-Item -LiteralPath build/x86-release/dinput8.dll -Destination $proxyX86Stage
+Add-ReleaseNotices -Destination $proxyX64Stage
+Add-ReleaseNotices -Destination $proxyX86Stage
+Compress-Archive -Path (Join-Path $proxyX64Stage '*') -DestinationPath release/ffb-proxy-x64.zip -Force
+Compress-Archive -Path (Join-Path $proxyX86Stage '*') -DestinationPath release/ffb-proxy-x86.zip -Force
 Push-Location viewer
 uv sync --extra dev
 $previousPath = $env:PATH
@@ -41,6 +66,8 @@ $viewerInternal = Join-Path (Get-Location) 'dist/ffb-viewer/_internal'
 if (Get-ChildItem -LiteralPath $viewerInternal -File -Filter 'icu*.dll') {
     throw 'Refusing to package host-provided ICU DLLs with the viewer.'
 }
+$viewerDist = Join-Path (Get-Location) 'dist/ffb-viewer'
+Add-ReleaseNotices -Destination $viewerDist
 $previousQtPlatform = $env:QT_QPA_PLATFORM
 try {
     $env:QT_QPA_PLATFORM = 'offscreen'
@@ -63,6 +90,7 @@ finally {
 uv run cyclonedx-py environment --pyproject pyproject.toml --output-reproducible -o ../release/sbom.cdx.json
 Compress-Archive -Path dist/ffb-viewer -DestinationPath ../release/ffb-viewer-x64.zip -Force
 Pop-Location
+Remove-Item -LiteralPath $stageRoot -Recurse -Force
 if (-not $env:RELEASE_TAG) { $env:RELEASE_TAG = 'local' }
 $archiveRef = if ($env:RELEASE_TAG -eq 'local') { 'HEAD' } else { $env:RELEASE_TAG }
 git archive --format=zip --output="release/ffb-interceptor-visualizer-$($env:RELEASE_TAG)-source.zip" $archiveRef
