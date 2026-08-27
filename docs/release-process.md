@@ -29,6 +29,8 @@ recreating it, preventing a previous local asset from being included. It also
 uses a clean DLL search path for PyInstaller and starts the packaged viewer in
 offscreen mode before archiving it; a Viewer that exits during this smoke check
 cannot be published.
+The packaging script also inspects each ZIP and fails if the binary, GPL/MIT
+notices, third-party notice, or bilingual README entries are missing.
 
 The `Security analysis` workflow is a release prerequisite: its CodeQL and
 dependency jobs run alongside a full-history gitleaks scan and pinned

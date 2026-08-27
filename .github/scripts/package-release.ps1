@@ -27,6 +27,30 @@ function Add-ReleaseNotices {
     Copy-Item -LiteralPath (Join-Path $root 'licenses/upstream-dcs-force-feedback-fix-MIT.txt') -Destination $licenseDirectory
 }
 
+function Assert-ZipEntries {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Archive,
+        [Parameter(Mandatory = $true)]
+        [string[]]$RequiredEntries
+    )
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archivePath = [System.IO.Path]::GetFullPath((Join-Path $root $Archive))
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($archivePath)
+    try {
+        $entryNames = @($zip.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
+        foreach ($entry in $RequiredEntries) {
+            if ($entryNames -notcontains $entry) {
+                throw "Archive $Archive is missing required entry: $entry"
+            }
+        }
+    }
+    finally {
+        $zip.Dispose()
+    }
+}
+
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
 $vsroot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 $devcmd = Join-Path $vsroot 'Common7/Tools/VsDevCmd.bat'
@@ -41,6 +65,16 @@ Add-ReleaseNotices -Destination $proxyX64Stage
 Add-ReleaseNotices -Destination $proxyX86Stage
 Compress-Archive -Path (Join-Path $proxyX64Stage '*') -DestinationPath release/ffb-proxy-x64.zip -Force
 Compress-Archive -Path (Join-Path $proxyX86Stage '*') -DestinationPath release/ffb-proxy-x86.zip -Force
+$proxyEntries = @(
+    'dinput8.dll',
+    'LICENSE',
+    'README.md',
+    'README.zh-TW.md',
+    'THIRD_PARTY_NOTICES.md',
+    'licenses/upstream-dcs-force-feedback-fix-MIT.txt'
+)
+Assert-ZipEntries -Archive 'release/ffb-proxy-x64.zip' -RequiredEntries $proxyEntries
+Assert-ZipEntries -Archive 'release/ffb-proxy-x86.zip' -RequiredEntries $proxyEntries
 Push-Location viewer
 uv sync --extra dev
 $previousPath = $env:PATH
@@ -90,6 +124,14 @@ finally {
 uv run cyclonedx-py environment --pyproject pyproject.toml --output-reproducible -o ../release/sbom.cdx.json
 Compress-Archive -Path dist/ffb-viewer -DestinationPath ../release/ffb-viewer-x64.zip -Force
 Pop-Location
+Assert-ZipEntries -Archive 'release/ffb-viewer-x64.zip' -RequiredEntries @(
+    'ffb-viewer/ffb-viewer.exe',
+    'ffb-viewer/LICENSE',
+    'ffb-viewer/README.md',
+    'ffb-viewer/README.zh-TW.md',
+    'ffb-viewer/THIRD_PARTY_NOTICES.md',
+    'ffb-viewer/licenses/upstream-dcs-force-feedback-fix-MIT.txt'
+)
 Remove-Item -LiteralPath $stageRoot -Recurse -Force
 if (-not $env:RELEASE_TAG) { $env:RELEASE_TAG = 'local' }
 $archiveRef = if ($env:RELEASE_TAG -eq 'local') { 'HEAD' } else { $env:RELEASE_TAG }
