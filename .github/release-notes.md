@@ -13,6 +13,8 @@ Highlights:
   `PIPE_REJECT_REMOTE_CLIENTS`, and client PID verification.
 - PID-scoped device/effect selectors prevent reused process-local IDs from
   being combined across producers.
+- Producer changes reset incompatible object selections, and zero sentinel IDs
+  are omitted from the object lists.
 - Command-channel selection, condition-axis inspection, time-weighted Command
   Peak/RMS, trace/CSV/PNG export, and redacted custom-effect handling.
 - CI validates proxy x86/x64 and viewer Python 3.12/3.13; clean-clone rebuilds

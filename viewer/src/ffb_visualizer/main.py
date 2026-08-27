@@ -57,6 +57,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pending: Queue[Frame] = Queue(maxsize=20_000)
         self._last_filter_received = -1
         self._last_filter_window = ""
+        self._last_filter_producer: int | None = None
         self.plot = pg.PlotWidget()
         self.plot.setLabel("left", "Selected command parameter")
         self.plot.setLabel("bottom", "Relative time", units="s")
@@ -225,25 +226,47 @@ class MainWindow(QtWidgets.QMainWindow):
     def _update_filters(self) -> None:
         """Refresh filter choices from stable IDs without retaining process paths."""
         current_window = self.window_box.currentText()
+        current_producer = self.producer_box.currentData()
         if (
             self._last_filter_received == self.store.received
             and self._last_filter_window == current_window
+            and self._last_filter_producer == current_producer
         ):
             return
         self._last_filter_received = self.store.received
         self._last_filter_window = current_window
-        values = self.store.window(float(self.window_box.currentText()))
+        self._last_filter_producer = current_producer
+        all_values = self.store.window(float(self.window_box.currentText()))
+        values = all_values
+        if current_producer is not None:
+            values = [event for event in values if event.process_id == current_producer]
         choices = (
-            (self.producer_box, "All producers", sorted({event.process_id for event in values})),
+            (
+                self.producer_box,
+                "All producers",
+                sorted({event.process_id for event in all_values}),
+            ),
             (
                 self.device_box,
                 "All devices",
-                sorted({_scoped_id(event.process_id, event.device_id) for event in values}),
+                sorted(
+                    {
+                        _scoped_id(event.process_id, event.device_id)
+                        for event in values
+                        if event.device_id
+                    }
+                ),
             ),
             (
                 self.effect_box,
                 "All effects",
-                sorted({_scoped_id(event.process_id, event.effect_id) for event in values}),
+                sorted(
+                    {
+                        _scoped_id(event.process_id, event.effect_id)
+                        for event in values
+                        if event.effect_id
+                    }
+                ),
             ),
         )
         for box, label, ids in choices:

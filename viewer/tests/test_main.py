@@ -41,10 +41,19 @@ def test_device_and_effect_filters_are_scoped_to_producer(qtbot) -> None:
     effect_index = window.effect_box.findData("101:9")
     assert device_index >= 0
     assert effect_index >= 0
+    assert window.device_box.findData("101:0") == -1
+    assert window.effect_box.findData("101:0") == -1
     window.device_box.setCurrentIndex(device_index)
     assert window._visible_events() == [first]
     window.effect_box.setCurrentIndex(effect_index)
     assert window._visible_events() == [first]
+
+    producer_index = window.producer_box.findData(202)
+    assert producer_index >= 0
+    window.producer_box.setCurrentIndex(producer_index)
+    assert window.device_box.findData("101:7") == -1
+    assert window.effect_box.findData("101:9") == -1
+    assert window._visible_events() == [second]
 
 
 @pytest.mark.performance
