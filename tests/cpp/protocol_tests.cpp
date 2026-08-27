@@ -29,7 +29,7 @@ std::vector<std::uint8_t> load_golden_fixture() {
     bytes.reserve(hex.size() / 2);
     for (std::size_t i = 0; i < hex.size(); i += 2) {
         unsigned int value = 0;
-        assert(std::sscanf_s(hex.c_str() + i, "%2x", &value) == 1);
+        assert(sscanf_s(hex.c_str() + i, "%2x", &value) == 1);
         bytes.push_back(static_cast<std::uint8_t>(value));
     }
     return bytes;
@@ -125,9 +125,9 @@ int main() {
         condition.dead_band = 6;
     }
     golden.type_specific_size = 24;
-    std::strcpy(golden.build_version, "0.1.0");
-    std::strcpy(golden.session_id, "fixture-session");
-    std::strcpy(golden.text, "fixture.exe");
+    strcpy_s(golden.build_version, "0.1.0");
+    strcpy_s(golden.session_id, "fixture-session");
+    strcpy_s(golden.text, "fixture.exe");
     const auto fixture = load_golden_fixture();
     assert(ffb::serialize_event(golden) == fixture);
     return 0;
