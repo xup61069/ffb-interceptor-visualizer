@@ -27,6 +27,8 @@ __pycache__/
 .mypy_cache/
 .coverage
 dist/
+release/
+viewer/*.spec
 *.egg-info/
 
 # Runtime captures and local settings
