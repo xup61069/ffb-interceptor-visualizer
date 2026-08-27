@@ -51,6 +51,13 @@ class PipeServer:
         # as an exception rather than a boolean result.
         pipe_connected = 535
         reject_remote = getattr(win32pipe, "PIPE_REJECT_REMOTE_CLIENTS", 0x00000008)
+        security = _security_attributes()
+        if security is None:
+            # Never fall back to the process/default DACL: that could expose
+            # command telemetry to another local user.  The viewer remains
+            # usable for offline traces while the production pipe is disabled.
+            self.errors += 1
+            return
 
         while not self._stop.is_set():
             handle = None
@@ -66,7 +73,7 @@ class PipeServer:
                     64 * 1024,
                     64 * 1024,
                     250,
-                    _security_attributes(),
+                    security,
                 )
                 try:
                     win32pipe.ConnectNamedPipe(handle, None)
