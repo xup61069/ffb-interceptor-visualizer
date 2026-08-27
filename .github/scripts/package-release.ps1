@@ -11,6 +11,7 @@ Compress-Archive -Path build/x86-release/dinput8.dll -DestinationPath release/ff
 Push-Location viewer
 uv sync --extra dev
 uv run pyinstaller --noconfirm --clean --onedir --name ffb-viewer src/ffb_visualizer/main.py
+uv run cyclonedx-py environment --pyproject pyproject.toml --output-reproducible -o ../release/sbom.cdx.json
 Compress-Archive -Path dist/ffb-viewer -DestinationPath ../release/ffb-viewer-x64.zip -Force
 Pop-Location
 if (-not $env:RELEASE_TAG) { $env:RELEASE_TAG = 'local' }
