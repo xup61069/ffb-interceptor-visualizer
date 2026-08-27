@@ -152,6 +152,10 @@ class MainWindow(QtWidgets.QMainWindow):
             f"process_id={event.process_id} device_id={event.device_id} effect_id={event.effect_id}",
             f"effect_guid={event.effect_guid.hex()} flags=0x{event.flags:08x} di_flags=0x{event.di_flags:08x}",
             f"duration={event.duration} gain={event.gain} iterations={event.iterations}",
+            (
+                f"envelope=(attack={event.envelope_attack_level}/{event.envelope_attack_time}, "
+                f"fade={event.envelope_fade_level}/{event.envelope_fade_time})"
+            ),
             f"magnitude={event.magnitude} ramp=({event.ramp_start}, {event.ramp_end})",
             (
                 f"periodic=(magnitude={event.periodic_magnitude}, offset={event.periodic_offset}, "
@@ -160,6 +164,12 @@ class MainWindow(QtWidgets.QMainWindow):
             f"axes={list(event.axes)} directions={list(event.directions)} conditions={len(event.conditions)}",
             f"custom_redacted={event.custom_redacted} type_specific_size={event.type_specific_size}",
         ]
+        lines.extend(
+            f"condition[{index}]=offset:{condition.offset} +coef:{condition.positive_coefficient} "
+            f"-coef:{condition.negative_coefficient} +sat:{condition.positive_saturation} "
+            f"-sat:{condition.negative_saturation} deadband:{condition.dead_band}"
+            for index, condition in enumerate(event.conditions)
+        )
         self.details.setPlainText("\n".join(lines))
 
     def _update_filters(self) -> None:
