@@ -2,8 +2,6 @@
 // Copyright (c) 2026 Valmantas Paliksa
 #include "proxy.h"
 
-#include <cwchar>
-
 bool OriginalDI8::load() {
     static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
     static BOOL loaded = FALSE;
@@ -11,15 +9,6 @@ bool OriginalDI8::load() {
         auto& original = OriginalDI8::instance();
         original.hModule = LoadLibraryExW(L"dinput8.dll", nullptr,
                                           LOAD_LIBRARY_SEARCH_SYSTEM32);
-        if (!original.hModule) {
-            wchar_t system_directory[MAX_PATH]{};
-            const UINT length = GetSystemDirectoryW(system_directory, MAX_PATH);
-            if (length > 0 && length < MAX_PATH - 12) {
-                wchar_t path[MAX_PATH]{};
-                swprintf_s(path, L"%s\\dinput8.dll", system_directory);
-                original.hModule = LoadLibraryW(path);
-            }
-        }
         if (!original.hModule) return TRUE;
         original.DirectInput8Create = reinterpret_cast<PFN_DirectInput8Create>(
             GetProcAddress(original.hModule, "DirectInput8Create"));
