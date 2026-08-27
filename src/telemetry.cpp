@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 
 namespace ffb {
@@ -101,6 +102,10 @@ Event Telemetry::hello_event() const noexcept {
     event.type = MessageType::Hello;
     event.process_id = GetCurrentProcessId();
     event.qpc_frequency = qpc_frequency();
+    std::snprintf(event.build_version, sizeof(event.build_version), "0.1.0");
+    std::snprintf(event.session_id, sizeof(event.session_id), "%lu-%llu",
+                  static_cast<unsigned long>(event.process_id),
+                  static_cast<unsigned long long>(qpc_now()));
 #if defined(_WIN64)
     event.flags = 64;
 #else

@@ -101,6 +101,8 @@ struct Event {
     std::array<ConditionSample, kMaxAxes> conditions{};
     std::uint32_t type_specific_size = 0;
     bool custom_redacted = false;
+    char build_version[32]{};
+    char session_id[32]{};
     char text[64]{};
 };
 

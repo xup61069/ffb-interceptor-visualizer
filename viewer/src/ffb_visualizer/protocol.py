@@ -72,6 +72,8 @@ class Frame:
     conditions: tuple[Condition, ...] = field(default_factory=tuple)
     type_specific_size: int = 0
     custom_redacted: bool = False
+    build_version: str = ""
+    session_id: str = ""
     text: str = ""
 
     @property
@@ -100,7 +102,7 @@ def decode_frame(data: bytes | bytearray | memoryview) -> Frame:
         raise ProtocolError("fragmented or trailing frame")
     payload = raw[HEADER_SIZE:]
     # process/device/effect/GUID + 18 DWORDs + 7 signed values + axis count
-    minimum = _BASE.size + (MAX_AXES * 4 * 2) + 4 + (MAX_AXES * _CONDITION.size) + 10
+    minimum = _BASE.size + (MAX_AXES * 4 * 2) + 4 + (MAX_AXES * _CONDITION.size) + 74
     if len(payload) < minimum:
         raise ProtocolError("truncated payload")
     values = _BASE.unpack_from(payload, 0)
@@ -153,8 +155,14 @@ def decode_frame(data: bytes | bytearray | memoryview) -> Frame:
             conditions.append(Condition(*values_c))
     type_specific_size = _u32(payload, offset)
     custom_redacted = bool(_u32(payload, offset + 4))
-    text_length = struct.unpack_from("<H", payload, offset + 8)[0]
-    offset += 10
+    build_version = (
+        payload[offset + 8 : offset + 40].split(b"\0", 1)[0].decode("utf-8", errors="replace")
+    )
+    session_id = (
+        payload[offset + 40 : offset + 72].split(b"\0", 1)[0].decode("utf-8", errors="replace")
+    )
+    text_length = struct.unpack_from("<H", payload, offset + 72)[0]
+    offset += 74
     if text_length > 63 or offset + text_length > len(payload):
         raise ProtocolError("invalid text length")
     text = payload[offset : offset + text_length].decode("utf-8", errors="replace")
@@ -195,6 +203,8 @@ def decode_frame(data: bytes | bytearray | memoryview) -> Frame:
         tuple(conditions),
         type_specific_size,
         custom_redacted,
+        build_version,
+        session_id,
         text,
     )
 

@@ -18,5 +18,8 @@ Payloads contain stable device/effect IDs, GUID, HRESULT, `DIEP_*` flags,
 duration, gain, direction, axes, envelope and tagged Constant/Ramp/Periodic/
 Condition fields. Axis and condition counts are capped at eight; frame size is
 capped at 64 KiB. Custom effects never copy arbitrary pointers or game memory.
+The `Hello` payload carries the process ID, bitness in header flags, QPC
+frequency, build version, per-process session ID and executable basename (never
+the full path). Other messages leave those identity strings empty.
 The current implementation decodes partial streams and rejects malformed,
 oversize, truncated and version-mismatched frames.

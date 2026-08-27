@@ -20,13 +20,17 @@ def fixture_frame() -> bytes:
         0,
     )
     payload = base + bytes(32 + 32) + struct.pack("<I", 0) + bytes(8 * 24)
-    payload += struct.pack("<IIH", 0, 1, 0)
+    payload += struct.pack("<II", 0, 1) + b"0.1.0\0" + bytes(26) + b"test-session\0" + bytes(19)
+    payload += struct.pack("<H", 0)
     return b"FFB1" + struct.pack("<HHIIQQ", 1, 6, 32 + len(payload), 0, 9, 100) + payload
 
 
 def test_decode_and_fragmented_stream() -> None:
     frame = decode_frame(fixture_frame())
     assert frame.effect_id == 3
+    assert frame.qpc_frequency == 1_000_000_000
+    assert frame.build_version == "0.1.0"
+    assert frame.session_id == "test-session"
     buf = bytearray(fixture_frame()[:17])
     assert list(iter_frames(buf)) == []
     buf.extend(fixture_frame()[17:])

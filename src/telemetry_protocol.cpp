@@ -2,6 +2,7 @@
 #include "telemetry_protocol.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 
 namespace ffb {
@@ -42,6 +43,11 @@ void put_string(std::vector<std::uint8_t>& out, const char* text) {
     const auto length = static_cast<std::uint16_t>(std::min<std::size_t>(strnlen_s(text, 63), 63));
     put_u16(out, length);
     out.insert(out.end(), text, text + length);
+}
+
+void put_fixed_string(std::vector<std::uint8_t>& out, const char* text, std::size_t capacity) {
+    const auto* begin = reinterpret_cast<const std::uint8_t*>(text);
+    out.insert(out.end(), begin, begin + capacity);
 }
 
 }  // namespace
@@ -197,6 +203,8 @@ std::vector<std::uint8_t> serialize_event(const Event& event) {
     for (std::size_t i = 0; i < kMaxAxes; ++i) put_condition(payload, event.conditions[i]);
     put_u32(payload, event.type_specific_size);
     put_u32(payload, event.custom_redacted ? 1u : 0u);
+    put_fixed_string(payload, event.build_version, sizeof(event.build_version));
+    put_fixed_string(payload, event.session_id, sizeof(event.session_id));
     put_string(payload, event.text);
 
     std::vector<std::uint8_t> frame;
