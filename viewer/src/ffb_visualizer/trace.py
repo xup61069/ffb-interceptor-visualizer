@@ -69,4 +69,6 @@ def _event_payload(event: Frame, origin: int, frequency: int) -> dict[str, objec
         ],
         "type_specific_size": event.type_specific_size,
         "custom_redacted": event.custom_redacted,
+        "effect_kind": event.effect_kind,
+        "command": event.command,
     }

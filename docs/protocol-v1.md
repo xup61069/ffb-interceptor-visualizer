@@ -16,8 +16,10 @@ little-endian header (32 bytes):
 
 Payloads contain stable device/effect IDs, GUID, HRESULT, `DIEP_*` flags,
 duration, gain, direction, axes, envelope and tagged Constant/Ramp/Periodic/
-Condition fields. Axis and condition counts are capped at eight; frame size is
-capped at 64 KiB. Custom effects never copy arbitrary pointers or game memory.
+Condition fields. The payload ends with optional little-endian `effect_kind` and
+`command` u16 values; older v1 readers may treat absent values as Unknown/zero.
+Axis and condition counts are capped at eight; frame size is capped at 64 KiB.
+Custom effects never copy arbitrary pointers or game memory.
 The `Hello` payload carries the process ID, bitness in header flags, QPC
 frequency, build version, per-process session ID and executable basename (never
 the full path). Other messages leave those identity strings empty.

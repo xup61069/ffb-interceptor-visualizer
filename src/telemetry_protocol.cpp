@@ -206,6 +206,10 @@ std::vector<std::uint8_t> serialize_event(const Event& event) {
     put_fixed_string(payload, event.build_version, sizeof(event.build_version));
     put_fixed_string(payload, event.session_id, sizeof(event.session_id));
     put_string(payload, event.text);
+    // Keep effect kind and command at the end so v1 readers can still parse
+    // older frames and treat these optional fields as Unknown/zero.
+    put_u16(payload, static_cast<std::uint16_t>(event.effect_kind));
+    put_u16(payload, event.command);
 
     std::vector<std::uint8_t> frame;
     frame.reserve(32 + payload.size());

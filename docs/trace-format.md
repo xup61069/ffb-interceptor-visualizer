@@ -5,8 +5,8 @@ The top-level object has `format: "ffbtrace"`, `version: 1`, the Hello QPC
 frequency, a basename-only `producer` value, an `events` array and user-created
 `markers`. Event timestamps are relative seconds from the first exported event.
 
-Each event contains the protocol message type, sequence, HRESULT, stable
-process/device/effect IDs, GUID and standard DirectInput values (duration,
+Each event contains the protocol message type, effect kind/command, sequence,
+HRESULT, stable process/device/effect IDs, GUID and standard DirectInput values (duration,
 gain, directions, axes, envelope, Constant/Ramp/Periodic fields and bounded
 Condition samples). Custom effect bytes and pointers are never written;
 `custom_redacted` and `type_specific_size` communicate that boundary. Full

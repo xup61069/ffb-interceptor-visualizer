@@ -148,7 +148,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self.details.clear()
             return
         lines = [
-            f"message_type={event.message_type} sequence={event.sequence} hresult=0x{event.hresult & 0xFFFFFFFF:08x}",
+            (
+                f"message_type={event.message_type} effect_kind={event.effect_kind} "
+                f"command={event.command} sequence={event.sequence} "
+                f"hresult=0x{event.hresult & 0xFFFFFFFF:08x}"
+            ),
             f"process_id={event.process_id} device_id={event.device_id} effect_id={event.effect_id}",
             f"effect_guid={event.effect_guid.hex()} flags=0x{event.flags:08x} di_flags=0x{event.di_flags:08x}",
             f"duration={event.duration} gain={event.gain} iterations={event.iterations}",
@@ -212,13 +216,23 @@ class MainWindow(QtWidgets.QMainWindow):
         with Path(path).open("w", newline="", encoding="utf-8") as stream:
             writer = csv.writer(stream)
             writer.writerow(
-                ["relative_seconds", "message_type", "device_id", "effect_id", "magnitude"]
+                [
+                    "relative_seconds",
+                    "message_type",
+                    "effect_kind",
+                    "command",
+                    "device_id",
+                    "effect_id",
+                    "magnitude",
+                ]
             )
             for event in events:
                 writer.writerow(
                     [
                         (event.qpc_ticks - origin) / self.store.qpc_frequency,
                         event.message_type,
+                        event.effect_kind,
+                        event.command,
                         event.device_id,
                         event.effect_id,
                         event.magnitude,

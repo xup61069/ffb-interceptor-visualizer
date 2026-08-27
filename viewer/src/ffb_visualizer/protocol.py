@@ -75,6 +75,8 @@ class Frame:
     build_version: str = ""
     session_id: str = ""
     text: str = ""
+    effect_kind: int = 0
+    command: int = 0
 
     @property
     def relative_seconds(self) -> float:
@@ -166,6 +168,12 @@ def decode_frame(data: bytes | bytearray | memoryview) -> Frame:
     if text_length > 63 or offset + text_length > len(payload):
         raise ProtocolError("invalid text length")
     text = payload[offset : offset + text_length].decode("utf-8", errors="replace")
+    trailing = len(payload) - (offset + text_length)
+    if trailing not in (0, 4):
+        raise ProtocolError("invalid trailing payload")
+    effect_kind = command = 0
+    if trailing == 4:
+        effect_kind, command = struct.unpack_from("<HH", payload, offset + text_length)
     return Frame(
         message_type,
         flags,
@@ -206,6 +214,8 @@ def decode_frame(data: bytes | bytearray | memoryview) -> Frame:
         build_version,
         session_id,
         text,
+        effect_kind,
+        command,
     )
 
 
