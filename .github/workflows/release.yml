@@ -24,6 +24,10 @@ jobs:
       - name: Build and package
         shell: pwsh
         run: .github/scripts/package-release.ps1
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.2.0
+        with:
+          subject-path: release/*
       - name: Create unsigned experimental release
         uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
         with:
