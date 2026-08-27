@@ -1,0 +1,39 @@
+name: Security analysis
+
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  push:
+    branches: [master]
+  pull_request:
+
+permissions: {}
+
+jobs:
+  codeql:
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@6f5948dfacef28e207b48d0905cf90c03365536d # v3
+        with:
+          languages: c-cpp, python
+      - uses: github/codeql-action/analyze@6f5948dfacef28e207b48d0905cf90c03365536d # v3
+
+  dependency-audit:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          python-version: '3.13'
+      - run: python -m pip install uv pip-audit
+      - working-directory: viewer
+        run: uv sync --extra dev; uv run pip-audit

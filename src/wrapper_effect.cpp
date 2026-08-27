@@ -1,154 +1,141 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Valmantas Paliksa
 #include "wrapper_effect.h"
-#include "ffb_state_registry.h"
-#include "logger.h"
-#include <cstring>
+#include "telemetry.h"
 
-// ---------------------------------------------------------------------------
-// Construction / destruction
-// ---------------------------------------------------------------------------
-WrapperEffect::WrapperEffect(IDirectInputEffect* real, std::shared_ptr<FFBFilter> filter)
-    : m_real(real)
-    , m_filter(std::move(filter))
-    , m_guid{}
-{
-    if (m_real) m_real->GetEffectGuid(&m_guid);
-    LOG_DEBUG("WrapperEffect created (real=%p) for [%ls]",
-              m_real, m_filter->deviceName().c_str());
-}
-
-WrapperEffect::WrapperEffect(REFGUID effectGuid, std::shared_ptr<FFBFilter> filter)
-    : m_real(nullptr)
-    , m_filter(std::move(filter))
-    , m_guid(effectGuid)
-{
-    LOG_DEBUG("WrapperEffect created (NULL-effect) for [%ls]",
-              m_filter->deviceName().c_str());
-}
+WrapperEffect::WrapperEffect(IDirectInputEffect* real, std::uint32_t device_id,
+                             std::uint32_t effect_id, REFGUID effect_guid)
+    : m_real(real), m_guid(effect_guid), m_device_id(device_id), m_effect_id(effect_id) {}
 
 WrapperEffect::~WrapperEffect() {
-    LOG_DEBUG("WrapperEffect destroyed for [%ls]", m_filter->deviceName().c_str());
     if (m_real) m_real->Release();
 }
 
-// ---------------------------------------------------------------------------
-// IUnknown
-// ---------------------------------------------------------------------------
-HRESULT STDMETHODCALLTYPE WrapperEffect::QueryInterface(REFIID riid, void** ppvObj) {
-    if (!ppvObj) return E_POINTER;
-
+HRESULT STDMETHODCALLTYPE WrapperEffect::QueryInterface(REFIID riid, void** out) {
+    if (!out) return E_POINTER;
+    *out = nullptr;
     if (riid == IID_IUnknown || riid == IID_IDirectInputEffect) {
-        *ppvObj = static_cast<IDirectInputEffect*>(this);
+        *out = static_cast<IDirectInputEffect*>(this);
         AddRef();
         return S_OK;
     }
-
-    *ppvObj = nullptr;
-    if (m_real) return m_real->QueryInterface(riid, ppvObj);
-    return E_NOINTERFACE;
+    return m_real ? m_real->QueryInterface(riid, out) : E_NOINTERFACE;
 }
 
 ULONG STDMETHODCALLTYPE WrapperEffect::AddRef() {
-    return InterlockedIncrement(&m_refCount);
+    return static_cast<ULONG>(InterlockedIncrement(&m_ref_count));
 }
 
 ULONG STDMETHODCALLTYPE WrapperEffect::Release() {
-    ULONG c = InterlockedDecrement(&m_refCount);
-    if (c == 0) delete this;
-    return c;
+    const ULONG count = static_cast<ULONG>(InterlockedDecrement(&m_ref_count));
+    if (count == 0) {
+        ffb::Event event{};
+        event.type = ffb::MessageType::EffectCommand;
+        event.command = static_cast<std::uint16_t>(ffb::EffectCommand::Release);
+        event.process_id = GetCurrentProcessId();
+        event.device_id = m_device_id;
+        event.effect_id = m_effect_id;
+        event.effect_guid = m_guid;
+        event.qpc_ticks = ffb::qpc_now();
+        ffb::Telemetry::instance().emit(event);
+        delete this;
+    }
+    return count;
 }
 
-// ---------------------------------------------------------------------------
-// IDirectInputEffect — pass-through or blocking/scaling
-// ---------------------------------------------------------------------------
-HRESULT STDMETHODCALLTYPE WrapperEffect::Initialize(
-    HINSTANCE hinst, DWORD dwVersion, REFGUID rguid)
-{
-    if (!m_real) return DI_OK;
-    return m_real->Initialize(hinst, dwVersion, rguid);
+HRESULT STDMETHODCALLTYPE WrapperEffect::Initialize(HINSTANCE instance, DWORD version,
+                                                     REFGUID guid) {
+    return m_real ? m_real->Initialize(instance, version, guid) : DI_OK;
 }
 
-HRESULT STDMETHODCALLTYPE WrapperEffect::GetEffectGuid(LPGUID pguid) {
-    if (!pguid) return E_POINTER;
-    *pguid = m_guid;
+HRESULT STDMETHODCALLTYPE WrapperEffect::GetEffectGuid(LPGUID guid) {
+    if (!guid) return E_POINTER;
+    *guid = m_guid;
     return DI_OK;
 }
 
-HRESULT STDMETHODCALLTYPE WrapperEffect::GetParameters(LPDIEFFECT peff, DWORD dwFlags) {
-    if (!m_real) {
-        // Null-effect: zero out what we can
-        if (peff) std::memset(peff, 0, sizeof(DIEFFECT));
-        return DI_OK;
-    }
-    return m_real->GetParameters(peff, dwFlags);
+HRESULT STDMETHODCALLTYPE WrapperEffect::GetParameters(LPDIEFFECT effect, DWORD flags) {
+    return m_real ? m_real->GetParameters(effect, flags) : DIERR_UNSUPPORTED;
 }
 
-HRESULT STDMETHODCALLTYPE WrapperEffect::SetParameters(LPCDIEFFECT peff, DWORD dwFlags) {
-    m_filter->logEffectParams(peff);
-
-    // Record params for auto-restart on reconnect
-    FFBStateRegistry::instance().recordParams(
-        m_filter->deviceName(), m_guid, peff);
-
-    if (!m_filter->isFFBAllowed()) return DI_OK;  // silently swallow
-
-    if (!m_real) return DI_OK;
-
-    // If scaling is active, work on a copy
-    if (m_filter->getScale() < 100 && peff) {
-        DIEFFECT copy = *peff;
-        m_filter->scaleEffect(&copy, m_guid);
-        return m_real->SetParameters(&copy, dwFlags);
-    }
-
-    return m_real->SetParameters(peff, dwFlags);
+HRESULT STDMETHODCALLTYPE WrapperEffect::SetParameters(LPCDIEFFECT effect, DWORD flags) {
+    const HRESULT hr = m_real ? m_real->SetParameters(effect, flags) : DIERR_UNSUPPORTED;
+    ffb::Event event{};
+    event.type = ffb::MessageType::EffectParametersChanged;
+    event.effect_kind = ffb::effect_kind_from_guid(m_guid);
+    event.process_id = GetCurrentProcessId();
+    event.device_id = m_device_id;
+    event.effect_id = m_effect_id;
+    event.effect_guid = m_guid;
+    event.hresult = hr;
+    event.flags = flags;
+    ffb::fill_effect_parameters(event, effect);
+    ffb::Telemetry::instance().emit(event);
+    return hr;
 }
 
-HRESULT STDMETHODCALLTYPE WrapperEffect::Start(DWORD dwIterations, DWORD dwFlags) {
-    m_filter->logEffectStart(dwIterations, dwFlags);
-
-    // Record start for auto-restart on reconnect
-    FFBStateRegistry::instance().recordStart(
-        m_filter->deviceName(), m_guid, dwIterations, dwFlags);
-
-    if (!m_filter->isFFBAllowed()) return DI_OK;
-    if (!m_real) return DI_OK;
-    return m_real->Start(dwIterations, dwFlags);
+HRESULT STDMETHODCALLTYPE WrapperEffect::Start(DWORD iterations, DWORD flags) {
+    const HRESULT hr = m_real ? m_real->Start(iterations, flags) : DIERR_UNSUPPORTED;
+    ffb::Event event{};
+    event.type = ffb::MessageType::EffectCommand;
+    event.command = static_cast<std::uint16_t>(ffb::EffectCommand::Start);
+    event.process_id = GetCurrentProcessId();
+    event.device_id = m_device_id;
+    event.effect_id = m_effect_id;
+    event.effect_guid = m_guid;
+    event.hresult = hr;
+    event.flags = flags;
+    event.iterations = iterations;
+    ffb::Telemetry::instance().emit(event);
+    return hr;
 }
 
 HRESULT STDMETHODCALLTYPE WrapperEffect::Stop() {
-    m_filter->logEffectStop();
-
-    // Record stop so auto-restart knows not to restart stopped effects
-    FFBStateRegistry::instance().recordStop(
-        m_filter->deviceName(), m_guid);
-
-    if (!m_filter->isFFBAllowed()) return DI_OK;
-    if (!m_real) return DI_OK;
-    return m_real->Stop();
+    const HRESULT hr = m_real ? m_real->Stop() : DIERR_UNSUPPORTED;
+    ffb::Event event{};
+    event.type = ffb::MessageType::EffectCommand;
+    event.command = static_cast<std::uint16_t>(ffb::EffectCommand::Stop);
+    event.process_id = GetCurrentProcessId();
+    event.device_id = m_device_id;
+    event.effect_id = m_effect_id;
+    event.effect_guid = m_guid;
+    event.hresult = hr;
+    ffb::Telemetry::instance().emit(event);
+    return hr;
 }
 
-HRESULT STDMETHODCALLTYPE WrapperEffect::GetEffectStatus(LPDWORD pdwFlags) {
-    if (!m_filter->isFFBAllowed() || !m_real) {
-        if (pdwFlags) *pdwFlags = 0;
-        return DI_OK;
-    }
-    return m_real->GetEffectStatus(pdwFlags);
+HRESULT STDMETHODCALLTYPE WrapperEffect::GetEffectStatus(LPDWORD status) {
+    return m_real ? m_real->GetEffectStatus(status) : DIERR_UNSUPPORTED;
 }
 
 HRESULT STDMETHODCALLTYPE WrapperEffect::Download() {
-    if (!m_filter->isFFBAllowed()) return DI_OK;
-    if (!m_real) return DI_OK;
-    return m_real->Download();
+    const HRESULT hr = m_real ? m_real->Download() : DIERR_UNSUPPORTED;
+    ffb::Event event{};
+    event.type = ffb::MessageType::EffectCommand;
+    event.command = static_cast<std::uint16_t>(ffb::EffectCommand::Download);
+    event.process_id = GetCurrentProcessId();
+    event.device_id = m_device_id;
+    event.effect_id = m_effect_id;
+    event.effect_guid = m_guid;
+    event.hresult = hr;
+    ffb::Telemetry::instance().emit(event);
+    return hr;
 }
 
 HRESULT STDMETHODCALLTYPE WrapperEffect::Unload() {
-    if (!m_real) return DI_OK;
-    return m_real->Unload();
+    const HRESULT hr = m_real ? m_real->Unload() : DIERR_UNSUPPORTED;
+    ffb::Event event{};
+    event.type = ffb::MessageType::EffectCommand;
+    event.command = static_cast<std::uint16_t>(ffb::EffectCommand::Unload);
+    event.process_id = GetCurrentProcessId();
+    event.device_id = m_device_id;
+    event.effect_id = m_effect_id;
+    event.effect_guid = m_guid;
+    event.hresult = hr;
+    ffb::Telemetry::instance().emit(event);
+    return hr;
 }
 
-HRESULT STDMETHODCALLTYPE WrapperEffect::Escape(LPDIEFFESCAPE pesc) {
-    if (!m_real) return DIERR_UNSUPPORTED;
-    return m_real->Escape(pesc);
+HRESULT STDMETHODCALLTYPE WrapperEffect::Escape(LPDIEFFESCAPE escape) {
+    return m_real ? m_real->Escape(escape) : DIERR_UNSUPPORTED;
 }

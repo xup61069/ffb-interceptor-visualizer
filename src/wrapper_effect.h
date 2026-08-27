@@ -4,44 +4,32 @@
 
 #include <windows.h>
 #include <dinput.h>
-#include <memory>
-#include "ffb_filter.h"
+#include <cstdint>
 
-// Wraps IDirectInputEffect, intercepting Start/Stop/SetParameters/Download
-// to apply FFB blocking and scaling per device policy.
-//
-// Supports a "null" mode (m_real == nullptr) for devices where FFB is blocked
-// and the real device refused to create the effect — all calls return DI_OK.
-class WrapperEffect : public IDirectInputEffect {
+class WrapperEffect final : public IDirectInputEffect {
 public:
-    // Wrap a real effect with a filter policy.
-    WrapperEffect(IDirectInputEffect* real, std::shared_ptr<FFBFilter> filter);
+    WrapperEffect(IDirectInputEffect* real, std::uint32_t device_id,
+                  std::uint32_t effect_id, REFGUID effect_guid);
+    ~WrapperEffect();
 
-    // Null-effect constructor: no underlying real effect, everything is a no-op.
-    WrapperEffect(REFGUID effectGuid, std::shared_ptr<FFBFilter> filter);
-
-    virtual ~WrapperEffect();
-
-    // ---- IUnknown ----
-    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppvObj) override;
-    ULONG   STDMETHODCALLTYPE AddRef() override;
-    ULONG   STDMETHODCALLTYPE Release() override;
-
-    // ---- IDirectInputEffect ----
-    HRESULT STDMETHODCALLTYPE Initialize(HINSTANCE hinst, DWORD dwVersion, REFGUID rguid) override;
-    HRESULT STDMETHODCALLTYPE GetEffectGuid(LPGUID pguid) override;
-    HRESULT STDMETHODCALLTYPE GetParameters(LPDIEFFECT peff, DWORD dwFlags) override;
-    HRESULT STDMETHODCALLTYPE SetParameters(LPCDIEFFECT peff, DWORD dwFlags) override;
-    HRESULT STDMETHODCALLTYPE Start(DWORD dwIterations, DWORD dwFlags) override;
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void**) override;
+    ULONG STDMETHODCALLTYPE AddRef() override;
+    ULONG STDMETHODCALLTYPE Release() override;
+    HRESULT STDMETHODCALLTYPE Initialize(HINSTANCE, DWORD, REFGUID) override;
+    HRESULT STDMETHODCALLTYPE GetEffectGuid(LPGUID) override;
+    HRESULT STDMETHODCALLTYPE GetParameters(LPDIEFFECT, DWORD) override;
+    HRESULT STDMETHODCALLTYPE SetParameters(LPCDIEFFECT, DWORD) override;
+    HRESULT STDMETHODCALLTYPE Start(DWORD, DWORD) override;
     HRESULT STDMETHODCALLTYPE Stop() override;
-    HRESULT STDMETHODCALLTYPE GetEffectStatus(LPDWORD pdwFlags) override;
+    HRESULT STDMETHODCALLTYPE GetEffectStatus(LPDWORD) override;
     HRESULT STDMETHODCALLTYPE Download() override;
     HRESULT STDMETHODCALLTYPE Unload() override;
-    HRESULT STDMETHODCALLTYPE Escape(LPDIEFFESCAPE pesc) override;
+    HRESULT STDMETHODCALLTYPE Escape(LPDIEFFESCAPE) override;
 
 private:
-    IDirectInputEffect*        m_real;      // may be nullptr (null-effect mode)
-    GUID                       m_guid;      // cached effect GUID
-    std::shared_ptr<FFBFilter> m_filter;
-    volatile LONG              m_refCount = 1;
+    IDirectInputEffect* m_real = nullptr;
+    GUID m_guid{};
+    std::uint32_t m_device_id = 0;
+    std::uint32_t m_effect_id = 0;
+    volatile LONG m_ref_count = 1;
 };

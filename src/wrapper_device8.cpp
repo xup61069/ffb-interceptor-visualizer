@@ -2,378 +2,166 @@
 // Copyright (c) 2026 Valmantas Paliksa
 #include "wrapper_device8.h"
 #include "wrapper_effect.h"
-#include "ffb_state_registry.h"
-#include "config.h"
-#include "logger.h"
+#include "telemetry.h"
 
-// ============================================================================
-// Construction / destruction
-// ============================================================================
-template<bool U>
-WrapperDevice8<U>::WrapperDevice8(Base* real, std::shared_ptr<FFBFilter> filter)
-    : m_real(real), m_filter(std::move(filter))
-{
-    LOG_INFO("WrapperDevice8<%s> created for [%ls]  FFB=%s  scale=%d%%",
-             U ? "W" : "A",
-             m_filter->deviceName().c_str(),
-             m_filter->isFFBAllowed() ? "allowed" : "BLOCKED",
-             m_filter->getScale());
+#include <new>
+
+namespace {
+
+void emit_effect(std::uint32_t device_id, std::uint32_t effect_id, REFGUID guid,
+                 LPCDIEFFECT parameters, HRESULT hr) noexcept {
+    ffb::Event event{};
+    event.type = ffb::MessageType::EffectCreated;
+    event.effect_kind = ffb::effect_kind_from_guid(guid);
+    event.process_id = GetCurrentProcessId();
+    event.device_id = device_id;
+    event.effect_id = effect_id;
+    event.effect_guid = guid;
+    event.hresult = hr;
+    ffb::fill_effect_parameters(event, parameters);
+    ffb::Telemetry::instance().emit(event);
 }
+
+void emit_property(std::uint32_t device_id, REFGUID property,
+                   LPCDIPROPHEADER header, HRESULT hr) noexcept {
+    if (!IsEqualGUID(property, DIPROP_FFGAIN) && !IsEqualGUID(property, DIPROP_AUTOCENTER)) return;
+    ffb::Event event{};
+    event.type = ffb::MessageType::DevicePropertyChanged;
+    event.process_id = GetCurrentProcessId();
+    event.device_id = device_id;
+    event.property_id = IsEqualGUID(property, DIPROP_FFGAIN) ? 1u : 2u;
+    event.hresult = hr;
+    __try {
+        if (header && header->dwSize >= sizeof(DIPROPDWORD)) {
+            event.gain = reinterpret_cast<const DIPROPDWORD*>(header)->dwData;
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        event.gain = 0;
+    }
+    ffb::Telemetry::instance().emit(event);
+}
+
+}  // namespace
+
+template<bool U>
+WrapperDevice8<U>::WrapperDevice8(Base* real, std::uint32_t device_id)
+    : m_real(real), m_device_id(device_id) {}
 
 template<bool U>
 WrapperDevice8<U>::~WrapperDevice8() {
-    LOG_DEBUG("WrapperDevice8<%s> destroyed for [%ls]", U ? "W" : "A",
-              m_filter->deviceName().c_str());
     if (m_real) m_real->Release();
 }
 
-// ============================================================================
-// IUnknown
-// ============================================================================
 template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::QueryInterface(REFIID riid, void** ppvObj) {
-    if (!ppvObj) return E_POINTER;
-
-    if (riid == IID_IUnknown) {
-        *ppvObj = static_cast<Base*>(this);
+HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::QueryInterface(REFIID riid, void** out) {
+    if (!out) return E_POINTER;
+    *out = nullptr;
+    if (riid == IID_IUnknown ||
+        (U ? riid == IID_IDirectInputDevice8W : riid == IID_IDirectInputDevice8A)) {
+        *out = static_cast<Base*>(this);
         AddRef();
         return S_OK;
     }
-
-    // Match the correct A or W IID
-    if constexpr (U) {
-        if (riid == IID_IDirectInputDevice8W) {
-            *ppvObj = static_cast<IDirectInputDevice8W*>(this);
-            AddRef();
-            return S_OK;
-        }
-    } else {
-        if (riid == IID_IDirectInputDevice8A) {
-            *ppvObj = static_cast<IDirectInputDevice8A*>(this);
-            AddRef();
-            return S_OK;
-        }
-    }
-
-    // Forward unknown IIDs to the real device
-    *ppvObj = nullptr;
-    return m_real->QueryInterface(riid, ppvObj);
+    return m_real ? m_real->QueryInterface(riid, out) : E_NOINTERFACE;
 }
 
 template<bool U>
 ULONG STDMETHODCALLTYPE WrapperDevice8<U>::AddRef() {
-    return InterlockedIncrement(&m_refCount);
+    return static_cast<ULONG>(InterlockedIncrement(&m_ref_count));
 }
 
 template<bool U>
 ULONG STDMETHODCALLTYPE WrapperDevice8<U>::Release() {
-    ULONG c = InterlockedDecrement(&m_refCount);
-    if (c == 0) delete this;
-    return c;
+    const ULONG count = static_cast<ULONG>(InterlockedDecrement(&m_ref_count));
+    if (count == 0) delete this;
+    return count;
 }
 
-// ============================================================================
-// Simple pass-through methods
-// ============================================================================
-
-// FFB-related DIDEVCAPS flags to clear when FFB is blocked
-static constexpr DWORD FFB_CAPS_FLAGS =
-    DIDC_FORCEFEEDBACK      |   // 0x00000100  device supports FFB
-    DIDC_FFATTACK           |   // 0x00000200  attack envelope
-    DIDC_FFFADE             |   // 0x00000400  fade envelope
-    DIDC_SATURATION         |   // 0x00000800
-    DIDC_POSNEGCOEFFICIENTS |   // 0x00001000
-    DIDC_POSNEGSATURATION   |   // 0x00002000
-    DIDC_DEADBAND           |   // 0x00004000
-    DIDC_STARTDELAY;            // 0x00008000
+template<bool U>
+HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetCapabilities(LPDIDEVCAPS value) {
+    return m_real->GetCapabilities(value);
+}
 
 template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetCapabilities(LPDIDEVCAPS lpDIDevCaps) {
-    HRESULT hr = m_real->GetCapabilities(lpDIDevCaps);
+HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::EnumObjects(EnumObjCbT callback, LPVOID ref, DWORD flags) {
+    return m_real->EnumObjects(callback, ref, flags);
+}
 
-    if (SUCCEEDED(hr) && lpDIDevCaps && !m_filter->isFFBAllowed()) {
-        // Strip all FFB-related flags so the game thinks this is a plain device.
-        lpDIDevCaps->dwFlags &= ~FFB_CAPS_FLAGS;
-        // Zero FFB timing fields too
-        lpDIDevCaps->dwFFSamplePeriod     = 0;
-        lpDIDevCaps->dwFFMinTimeResolution = 0;
-        LOG_DEBUG("GetCapabilities [%ls]: stripped FFB caps flags",
-                  m_filter->deviceName().c_str());
-    }
+template<bool U>
+HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetProperty(REFGUID guid, LPDIPROPHEADER header) {
+    return m_real->GetProperty(guid, header);
+}
 
+template<bool U>
+HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SetProperty(REFGUID guid, LPCDIPROPHEADER header) {
+    const HRESULT hr = m_real->SetProperty(guid, header);
+    emit_property(m_device_id, guid, header, hr);
     return hr;
 }
 
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::EnumObjects(
-    EnumObjCbT lpCallback, LPVOID pvRef, DWORD dwFlags)
-{
-    return m_real->EnumObjects(lpCallback, pvRef, dwFlags);
-}
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Acquire() { return m_real->Acquire(); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Unacquire() { return m_real->Unacquire(); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetDeviceState(DWORD size, LPVOID data) { return m_real->GetDeviceState(size, data); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetDeviceData(DWORD size, LPDIDEVICEOBJECTDATA data, LPDWORD count, DWORD flags) { return m_real->GetDeviceData(size, data, count, flags); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SetDataFormat(LPCDIDATAFORMAT format) { return m_real->SetDataFormat(format); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SetEventNotification(HANDLE event) { return m_real->SetEventNotification(event); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SetCooperativeLevel(HWND window, DWORD flags) { return m_real->SetCooperativeLevel(window, flags); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetObjectInfo(DevObjInstT* info, DWORD object, DWORD how) { return m_real->GetObjectInfo(info, object, how); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetDeviceInfo(DevInstT* info) { return m_real->GetDeviceInfo(info); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::RunControlPanel(HWND owner, DWORD flags) { return m_real->RunControlPanel(owner, flags); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Initialize(HINSTANCE instance, DWORD version, REFGUID guid) { return m_real->Initialize(instance, version, guid); }
 
 template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetProperty(
-    REFGUID rguidProp, LPDIPROPHEADER pdiph)
-{
-    return m_real->GetProperty(rguidProp, pdiph);
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SetProperty(
-    REFGUID rguidProp, LPCDIPROPHEADER pdiph)
-{
-    return m_real->SetProperty(rguidProp, pdiph);
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Acquire() {
-    return m_real->Acquire();
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Unacquire() {
-    return m_real->Unacquire();
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetDeviceState(DWORD cbData, LPVOID lpvData) {
-    return m_real->GetDeviceState(cbData, lpvData);
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetDeviceData(
-    DWORD cbObjectData, LPDIDEVICEOBJECTDATA rgdod, LPDWORD pdwInOut, DWORD dwFlags)
-{
-    return m_real->GetDeviceData(cbObjectData, rgdod, pdwInOut, dwFlags);
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SetDataFormat(LPCDIDATAFORMAT lpdf) {
-    return m_real->SetDataFormat(lpdf);
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SetEventNotification(HANDLE hEvent) {
-    return m_real->SetEventNotification(hEvent);
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SetCooperativeLevel(HWND hwnd, DWORD dwFlags) {
-    return m_real->SetCooperativeLevel(hwnd, dwFlags);
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetObjectInfo(
-    DevObjInstT* pdidoi, DWORD dwObj, DWORD dwHow)
-{
-    return m_real->GetObjectInfo(pdidoi, dwObj, dwHow);
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetDeviceInfo(DevInstT* pdidi) {
-    return m_real->GetDeviceInfo(pdidi);
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::RunControlPanel(HWND hwndOwner, DWORD dwFlags) {
-    return m_real->RunControlPanel(hwndOwner, dwFlags);
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Initialize(
-    HINSTANCE hinst, DWORD dwVersion, REFGUID rguid)
-{
-    return m_real->Initialize(hinst, dwVersion, rguid);
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Escape(LPDIEFFESCAPE pesc) {
-    return m_real->Escape(pesc);
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Poll() {
-    return m_real->Poll();
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SendDeviceData(
-    DWORD cbObjectData, LPCDIDEVICEOBJECTDATA rgdod, LPDWORD pdwInOut, DWORD fl)
-{
-    return m_real->SendDeviceData(cbObjectData, rgdod, pdwInOut, fl);
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::BuildActionMap(
-    ActFmtT* lpdiaf, const Char* lpszUserName, DWORD dwFlags)
-{
-    return m_real->BuildActionMap(lpdiaf, lpszUserName, dwFlags);
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SetActionMap(
-    ActFmtT* lpdiaf, const Char* lpszUserName, DWORD dwFlags)
-{
-    return m_real->SetActionMap(lpdiaf, lpszUserName, dwFlags);
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetImageInfo(
-    ImgInfoT* lpdiDevImageInfoHeader)
-{
-    return m_real->GetImageInfo(lpdiDevImageInfoHeader);
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::EnumEffectsInFile(
-    const Char* lpszFileName, LPDIENUMEFFECTSINFILECALLBACK pec, LPVOID pvRef, DWORD dwFlags)
-{
-    return m_real->EnumEffectsInFile(lpszFileName, pec, pvRef, dwFlags);
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::WriteEffectToFile(
-    const Char* lpszFileName, DWORD dwEntries, LPDIFILEEFFECT rgDiFileEft, DWORD dwFlags)
-{
-    return m_real->WriteEffectToFile(lpszFileName, dwEntries, rgDiFileEft, dwFlags);
-}
-
-// ============================================================================
-// FFB-intercepted methods
-// ============================================================================
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::CreateEffect(
-    REFGUID rguid, LPCDIEFFECT lpeff, LPDIRECTINPUTEFFECT* ppdeff, LPUNKNOWN punkOuter)
-{
-    m_filter->logEffectCreation(rguid);
-
-    if (!ppdeff) return E_POINTER;
-
-    // Try to create the real effect on the underlying device
-    IDirectInputEffect* realEffect = nullptr;
-    HRESULT hr = m_real->CreateEffect(rguid, lpeff, &realEffect, punkOuter);
-
-    if (SUCCEEDED(hr) && realEffect) {
-        // Wrap the real effect with our filter
-        auto* wrapper = new WrapperEffect(realEffect, m_filter);
-        *ppdeff = wrapper;
-
-        // --- Auto-restart: check if this effect was previously running ---
-        if (Config::instance().ffbAutoRestart && m_filter->isFFBAllowed()) {
-            auto& registry = FFBStateRegistry::instance();
-            DWORD iterations = 0, startFlags = 0;
-            if (registry.wasRunning(m_filter->deviceName(), rguid,
-                                    iterations, startFlags))
-            {
-                LOG_INFO("FFB [%ls] Auto-restarting %s after reconnect"
-                         " (iterations=%lu flags=0x%lx)",
-                         m_filter->deviceName().c_str(),
-                         FFBFilter::effectGuidToString(rguid),
-                         iterations, startFlags);
-
-                // Replay last-known parameters if available
-                const auto* record = registry.getRecord(
-                    m_filter->deviceName(), rguid);
-                if (record && record->hasParams) {
-                    DIEFFECT paramsCopy = record->params;
-                    paramsCopy.dwSize = sizeof(DIEFFECT);
-
-                    // Build DIEP flags dynamically — only include flags for
-                    // fields that are actually populated, otherwise DI
-                    // returns E_INVALIDARG.
-                    DWORD setFlags = DIEP_NODOWNLOAD;  // don't auto-download yet
-                    if (paramsCopy.dwDuration)   setFlags |= DIEP_DURATION;
-                    if (paramsCopy.dwGain)       setFlags |= DIEP_GAIN;
-                    if (paramsCopy.dwSamplePeriod) setFlags |= DIEP_SAMPLEPERIOD;
-                    if (paramsCopy.dwStartDelay) setFlags |= DIEP_STARTDELAY;
-                    if (paramsCopy.cAxes > 0 && paramsCopy.rgdwAxes)
-                        setFlags |= DIEP_AXES | DIEP_DIRECTION;
-                    if (paramsCopy.cbTypeSpecificParams > 0 &&
-                        paramsCopy.lpvTypeSpecificParams)
-                        setFlags |= DIEP_TYPESPECIFICPARAMS;
-                    if (paramsCopy.lpEnvelope)
-                        setFlags |= DIEP_ENVELOPE;
-
-                    LOG_DEBUG("FFB [%ls] Auto-restart SetParameters flags=0x%lx"
-                              " axes=%lu typeSpec=%lu envelope=%s",
-                              m_filter->deviceName().c_str(), setFlags,
-                              paramsCopy.cAxes,
-                              paramsCopy.cbTypeSpecificParams,
-                              paramsCopy.lpEnvelope ? "yes" : "no");
-
-                    HRESULT spHr = realEffect->SetParameters(
-                        &paramsCopy, setFlags);
-                    if (FAILED(spHr)) {
-                        LOG_WARN("FFB [%ls] Auto-restart SetParameters failed: 0x%08lx",
-                                 m_filter->deviceName().c_str(), spHr);
-                    }
-                }
-
-                // Auto-start the effect
-                HRESULT startHr = realEffect->Start(iterations, startFlags);
-                if (FAILED(startHr)) {
-                    LOG_WARN("FFB [%ls] Auto-restart Start failed: 0x%08lx",
-                             m_filter->deviceName().c_str(), startHr);
-                }
-            }
-        }
-
+HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::CreateEffect(REFGUID guid, LPCDIEFFECT parameters,
+                                                            LPDIRECTINPUTEFFECT* out, LPUNKNOWN outer) {
+    if (!out) return E_POINTER;
+    *out = nullptr;
+    if (!m_real) return DIERR_NOTINITIALIZED;
+    IDirectInputEffect* real = nullptr;
+    const HRESULT hr = m_real->CreateEffect(guid, parameters, &real, outer);
+    if (FAILED(hr) || !real || outer != nullptr) {
+        emit_effect(m_device_id, 0, guid, parameters, hr);
+        *out = real;
         return hr;
     }
-
-    // If the real device can't create the effect (e.g. vJoy) and FFB is blocked,
-    // return a null-effect so the caller doesn't see an error.
-    if (!m_filter->isFFBAllowed()) {
-        LOG_DEBUG("Real CreateEffect failed (hr=0x%08lx) but FFB blocked — returning null effect", hr);
-        *ppdeff = new WrapperEffect(rguid, m_filter);
-        return DI_OK;
+    const std::uint32_t effect_id = ffb::Telemetry::instance().next_effect_id();
+    auto* wrapped = new (std::nothrow) WrapperEffect(real, m_device_id, effect_id, guid);
+    if (!wrapped) {
+        emit_effect(m_device_id, effect_id, guid, parameters, hr);
+        *out = real;
+        return hr;
     }
-
-    // Otherwise propagate the real error
-    *ppdeff = nullptr;
+    emit_effect(m_device_id, effect_id, guid, parameters, hr);
+    *out = wrapped;
     return hr;
 }
 
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::EnumEffects(
-    EnumFxCbT lpCallback, LPVOID pvRef, DWORD dwEffType)
-{
-    return m_real->EnumEffects(lpCallback, pvRef, dwEffType);
-}
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::EnumEffects(EnumFxCbT callback, LPVOID ref, DWORD type) { return m_real->EnumEffects(callback, ref, type); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetEffectInfo(EffInfoT* info, REFGUID guid) { return m_real->GetEffectInfo(info, guid); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetForceFeedbackState(LPDWORD value) { return m_real->GetForceFeedbackState(value); }
 
 template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetEffectInfo(EffInfoT* pdei, REFGUID rguid) {
-    return m_real->GetEffectInfo(pdei, rguid);
+HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SendForceFeedbackCommand(DWORD flags) {
+    const HRESULT hr = m_real->SendForceFeedbackCommand(flags);
+    ffb::Event event{};
+    event.type = ffb::MessageType::DeviceCommand;
+    event.process_id = GetCurrentProcessId();
+    event.device_id = m_device_id;
+    event.di_flags = flags;
+    event.hresult = hr;
+    ffb::Telemetry::instance().emit(event);
+    return hr;
 }
 
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetForceFeedbackState(LPDWORD pdwOut) {
-    if (!m_filter->isFFBAllowed()) {
-        if (pdwOut) *pdwOut = 0;
-        return DI_OK;
-    }
-    return m_real->GetForceFeedbackState(pdwOut);
-}
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::EnumCreatedEffectObjects(LPDIENUMCREATEDEFFECTOBJECTSCALLBACK callback, LPVOID ref, DWORD flags) { return m_real->EnumCreatedEffectObjects(callback, ref, flags); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Escape(LPDIEFFESCAPE escape) { return m_real->Escape(escape); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Poll() { return m_real->Poll(); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SendDeviceData(DWORD size, LPCDIDEVICEOBJECTDATA data, LPDWORD count, DWORD flags) { return m_real->SendDeviceData(size, data, count, flags); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::BuildActionMap(ActFmtT* format, const Char* user, DWORD flags) { return m_real->BuildActionMap(format, user, flags); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SetActionMap(ActFmtT* format, const Char* user, DWORD flags) { return m_real->SetActionMap(format, user, flags); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetImageInfo(std::conditional_t<U, LPDIDEVICEIMAGEINFOHEADERW, LPDIDEVICEIMAGEINFOHEADERA> info) { return m_real->GetImageInfo(info); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::EnumEffectsInFile(const Char* file, LPDIENUMEFFECTSINFILECALLBACK callback, LPVOID ref, DWORD flags) { return m_real->EnumEffectsInFile(file, callback, ref, flags); }
+template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::WriteEffectToFile(const Char* file, DWORD entries, LPDIFILEEFFECT effects, DWORD flags) { return m_real->WriteEffectToFile(file, entries, effects, flags); }
 
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SendForceFeedbackCommand(DWORD dwFlags) {
-    m_filter->logCommand(dwFlags);
-
-    if (!m_filter->isFFBAllowed()) {
-        return DI_OK;  // silently swallow
-    }
-    return m_real->SendForceFeedbackCommand(dwFlags);
-}
-
-template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::EnumCreatedEffectObjects(
-    LPDIENUMCREATEDEFFECTOBJECTSCALLBACK lpCallback, LPVOID pvRef, DWORD fl)
-{
-    return m_real->EnumCreatedEffectObjects(lpCallback, pvRef, fl);
-}
-
-// ============================================================================
-// Explicit template instantiations
-// ============================================================================
-template class WrapperDevice8<false>;  // A
-template class WrapperDevice8<true>;   // W
+template class WrapperDevice8<false>;
+template class WrapperDevice8<true>;

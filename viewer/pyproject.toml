@@ -1,0 +1,40 @@
+[project]
+name = "ffb-interceptor-viewer"
+version = "0.1.0"
+description = "DirectInput8 force-feedback command and effect visualizer"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "GPL-3.0-only" }
+dependencies = [
+  "numpy>=2.1,<3",
+  "PySide6>=6.8,<7",
+  "pyqtgraph>=0.13.7,<1",
+  "pywin32>=308; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=9.0.3,<10",
+  "pytest-qt>=4.4,<5",
+  "ruff>=0.8,<1",
+  "ty>=0.0.1",
+  "pip-audit>=2.7,<3",
+]
+
+[project.scripts]
+ffb-viewer = "ffb_visualizer.main:run"
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ffb_visualizer"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

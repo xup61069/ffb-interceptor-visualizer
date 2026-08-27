@@ -1,7 +1,6 @@
 # Build directories
 build/
-build-debug/
-build-release/
+out/
 
 # CMake generated
 CMakeCache.txt
@@ -18,6 +17,31 @@ compile_commands.json
 *.pdb
 *.ilk
 *.obj
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+dist/
+*.egg-info/
+
+# Runtime captures and local settings
+*.ffbtrace
+*.csv
+*.log
+captures/
+.env*
+*.pfx
+*.p12
+*.snk
+
+# Do not vendor system/game/SimHub binaries
+dinput8.dll
+SimHub.Plugins.dll
 
 # Visual Studio
 .vs/

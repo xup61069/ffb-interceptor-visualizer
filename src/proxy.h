@@ -22,9 +22,8 @@ struct OriginalDI8 {
     PFN_DllRegisterServer    DllRegisterServer   = nullptr;
     PFN_DllUnregisterServer  DllUnregisterServer = nullptr;
 
-    // Load the real system dinput8.dll. Safe to call multiple times.
+    // Load the real system dinput8.dll from System32. Safe to call repeatedly.
     bool load();
-    void unload();
 
     static OriginalDI8& instance();
 };

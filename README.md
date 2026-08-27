@@ -1,189 +1,82 @@
-# dinput8 Wrapper — DCS FFB Filter
+# FFB Interceptor + Visualizer
 
-**Author:** Valmantas Palikša  
-**License:** MIT — see [LICENSE](LICENSE)
+FFB Interceptor is an **unsigned experimental** Windows tool that observes
+Force-Feedback commands sent through DirectInput8 and displays their command
+parameters in a live viewer. It forwards every DirectInput call and HRESULT
+unchanged. A graph labelled **Command Peak/RMS** describes the selected API
+channel; it is not a measurement of motor torque.
 
-A DirectInput8 proxy DLL that wraps the system `dinput8.dll` to intercept and
-control Force Feedback (FFB) behaviour on a per-device basis. Primary use case:
-disable or scale FFB for specific joystick types (e.g. vJoy) in DCS World.
+Version 0.1.0 supports a C++17 `dinput8.dll` proxy for x86 and x64 and a
+Python 3.12+ x64 PySide6/pyqtgraph viewer. The proxy is derived from
+[walmis/dcs-force-feedback-fix](https://github.com/walmis/dcs-force-feedback-fix)
+v0.2 (MIT) and keeps its history. New code is GPL-3.0-only.
 
-## Features
+## Scope and safety
 
-- **Per-device FFB blocking** — completely disable FFB for devices matched by
-  product name substring (e.g. vJoy)
-- **Per-device FFB scaling** — scale force magnitudes to a percentage (0-100%)
-- **FFB auto-restart after reconnect** — automatically restores running FFB
-  effects (spring centering, trim forces, etc.) when a device is disconnected
-  and reconnected mid-session, without requiring a mission restart
-- **FFB effect logging** — log all FFB operations (CreateEffect, Start, Stop,
-  SetParameters, SendForceFeedbackCommand) to a log file for debugging
-- **INI-based configuration** — simple `dinput8.ini` config file, no registry
-  or external dependencies
-- **Full COM proxy** — wraps both `IDirectInput8A` and `IDirectInput8W`,
-  `IDirectInputDevice8A/W`, and `IDirectInputEffect`
-- **Null-effect fallback** — when FFB is blocked for a device that doesn't
-  support it, returns a silent stub so the game never sees errors
+Only DirectInput8 devices created through `DirectInput8Create` are supported.
+GameInput, WinRT, XInput and private SDK paths are outside v0.1. There is no
+anti-cheat bypass, online-competition feature, driver/HID hook, memory scan,
+network service, SimHub plug-in, or physical torque measurement. iRacing is
+explicitly unsupported as a support policy; GPL does not impose an additional
+use restriction.
 
-## Building
+High-torque wheelbases can move unexpectedly. Keep hands clear, use a physical
+stop, begin at minimum gain, and test offline. A game directory may already
+contain another `dinput8.dll`: never overwrite it. Rename it to a backup and
+restore that exact file when removing this experiment. If the game fails to
+start, remove the proxy and viewer; the game then uses its normal system DLL.
 
-### Requirements
-- CMake 3.20+
-- Clang/LLVM (clang-cl) — tested with Clang 20
-- Windows SDK 10
+## Build the proxy
 
-### Build Steps
+Install Visual Studio 2022/2026 C++ tools, Windows SDK, CMake 3.20+, and
+Ninja. From a Visual Studio developer prompt:
+
 ```powershell
-# Debug build
-cmake --preset clang-debug
-cmake --build build-debug
-
-# Release build
-cmake --preset clang-release
-cmake --build build
+cmake --preset msvc-x64-release
+cmake --build --preset x64-release --target dinput8
+cmake --build --preset x86-release --target dinput8   # use a -arch=x86 prompt
+ctest --test-dir build/x64-release --output-on-failure
 ```
 
-The output `dinput8.dll` is placed in the build directory.
+Copy the resulting `dinput8.dll` beside a game executable only after backing
+up an existing proxy. The proxy lazily loads the genuine System32 DLL and
+remains fail-open when the viewer is absent.
 
-## Installation
+## Run the viewer
 
-1. Copy `dinput8.dll` to the game directory (next to the game executable).
-   For DCS World: `C:\Program Files\Eagle Dynamics\DCS World\bin-mt\`
-2. Copy `dinput8.ini` to the same directory.
-3. Edit `dinput8.ini` to configure FFB rules for your devices.
-4. Launch the game. A log file `dinput8_wrapper.log` will be created in the
-   same directory.
+Windows x64 with Python 3.12+ and [uv](https://docs.astral.sh/uv/):
 
-## Configuration
-
-Edit `dinput8.ini`:
-
-```ini
-[General]
-Enabled=true        ; Master switch (false = pure pass-through)
-LogLevel=3          ; 0=none, 1=error, 2=warn, 3=info, 4=debug
-
-[FFB]
-Enabled=true        ; Global FFB enable (false = block ALL devices)
-LogEffects=true     ; Log every FFB operation to the log file
-DefaultScale=100    ; Default force scale for all devices (0-100)
-AutoRestart=true    ; Auto-restart FFB effects after device reconnection
-
-[FFBDevices]
-; Per-device rules — first substring match wins.
-; Actions: block, allow, or 0-100 (scale percentage)
-vJoy=block          ; Block all FFB for any device with "vJoy" in the name
-; MSFFB 2=50        ; Example: scale to 50%
+```powershell
+cd viewer
+uv sync --extra dev
+uv run ffb-viewer
 ```
 
-### How to Find Your Device Names
+The viewer owns the multi-instance named-pipe server
+`\\.\pipe\ffb-interceptor-v1`. Data stays in memory unless the user presses
+an export control. Exports contain relative time, executable basename, stable
+in-process IDs and command fields only; no full paths, serials, account names
+or host names.
 
-To block unwanted devices from receiving FFB, you need to know their exact
-DirectInput product names. There are two ways:
+## Protocol
 
-**Option 1 — From the wrapper log:**
+Protocol v1 uses an explicit little-endian 32-byte header and a bounded,
+pointer-free payload. Frames are limited to 64 KiB and eight axes. Unknown or
+custom effects carry only a GUID, declared length and redacted/truncated flag.
+See [docs/protocol-v1.md](docs/protocol-v1.md) and
+[docs/security-model.md](docs/security-model.md).
 
-1. Install the wrapper (see [Installation](#installation))
-2. Set `LogLevel=3` (Info) in `dinput8.ini`
-3. Launch DCS and load a mission
-4. Open `dinput8_wrapper.log` in the game directory
-5. Look for `CreateDevice:` lines:
-   ```
-   [INFO]  CreateDevice: [VPforce Rhino FFB Joystick]  FFB=allowed  scale=100%
-   [INFO]  CreateDevice: [vJoy Device]  FFB=BLOCKED  scale=0%
-   [INFO]  CreateDevice: [Mouse]  FFB=allowed  scale=100%
-   ```
-   The text in `[brackets]` is the device product name to use in `[FFBDevices]`.
+## Contributing and licence
 
-**Option 2 — From `dcs.log`:**
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). The distribution is licensed under
+the [GNU GPLv3](LICENSE). The inherited upstream notice is preserved in
+[`licenses/upstream-dcs-force-feedback-fix-MIT.txt`](licenses/upstream-dcs-force-feedback-fix-MIT.txt)
+and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-1. Open `dcs.log` (in `%USERPROFILE%\Saved Games\DCS\Logs\`)
-2. Search for `INPUT (Main): created` lines:
-   ```
-   INPUT (Main): created [VPforce Rhino FFB Joystick] with full id [...],ForceFeedBack: yes
-   INPUT (Main): created [vJoy Device] with full id [...]
-   INPUT (Main): created [vJoy Device] with full id [...]
-   ```
-   Devices with `ForceFeedBack: yes` are FFB-capable. Others may still
-   receive FFB commands from DCS if it thinks they support it.
+## Status
 
-### Blocking Unwanted FFB Devices
-
-Add lines to the `[FFBDevices]` section using a substring of the product
-name. Matching is case-insensitive and first match wins.
-
-**Example — block vJoy and keep only VPforce for FFB:**
-```ini
-[FFBDevices]
-vJoy=block
-```
-
-**Example — block everything except one specific device:**
-```ini
-[FFB]
-Enabled=false       ; Disable FFB globally
-
-[FFBDevices]
-VPforce=allow       ; Explicitly allow FFB for VPforce devices
-```
-
-**Example — scale one device, block others:**
-```ini
-[FFBDevices]
-vJoy=block
-Pedals=block
-VPforce=50          ; Scale VPforce FFB to 50%
-```
-
-### Device Matching
-
-Rules in `[FFBDevices]` match against the device's DirectInput **product name**
-using case-insensitive substring search. The first matching rule wins.
-
-## Architecture
-
-```
-Game (DCS)
-  │
-  ├── DirectInput8Create()
-  │       │
-  │   ┌───▼──────────────┐
-  │   │ WrapperDInput8    │  ← intercepts CreateDevice
-  │   └───┬──────────────┘
-  │       │
-  │   ┌───▼──────────────┐
-  │   │ WrapperDevice8    │  ← intercepts CreateEffect, SendFFBCommand
-  │   └───┬──────────────┘
-  │       │
-  │   ┌───▼──────────────┐
-  │   │ WrapperEffect     │  ← intercepts Start/Stop/SetParams/Download
-  │   └───┬──────────────┘
-  │       │
-  └───────▼───────────────
-      Real dinput8.dll (System32)
-```
-
-## File Structure
-
-```
-├── CMakeLists.txt           # Build configuration
-├── CMakePresets.json        # Clang presets (debug/release)
-├── dinput8.def              # DLL export definitions
-├── dinput8.ini              # Default configuration
-├── README.md
-├── docs/
-│   └── PLAN-device-reconnect.md  # Design document for auto-restart feature
-└── src/
-    ├── dllmain.cpp              # DLL entry point + DirectInput8Create export
-    ├── proxy.h/cpp              # Loads real system dinput8.dll
-    ├── logger.h/cpp             # File-based logging
-    ├── config.h/cpp             # INI parser + device policy resolution
-    ├── ffb_filter.h/cpp         # FFB policy enforcement + effect logging
-    ├── ffb_state_registry.h/cpp # Global FFB state tracking for auto-restart
-    ├── wrapper_dinput8.h/cpp    # IDirectInput8 A/W wrapper
-    ├── wrapper_device8.h/cpp    # IDirectInputDevice8 A/W wrapper
-    └── wrapper_effect.h/cpp     # IDirectInputEffect wrapper
-```
-
-## License
-
-MIT License — Copyright (c) 2026 Valmantas Palikša. See [LICENSE](LICENSE) for full text.
+v0.1.0 is a prerelease and is marked `UNSIGNED EXPERIMENTAL`. Synthetic
+protocol/queue tests are the release gate. Real hardware or commercial-game
+results are not compatibility claims unless accompanied by explicit
+authorization and reproducible evidence.

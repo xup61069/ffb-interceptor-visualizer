@@ -1,0 +1,93 @@
+# SPDX-License-Identifier: GPL-3.0-only
+"""Background named-pipe receiver for the production Windows pipe."""
+
+from __future__ import annotations
+
+import os
+import threading
+from collections.abc import Callable
+
+from .protocol import ProtocolError, iter_frames
+
+PIPE_NAME = r"\\.\pipe\ffb-interceptor-v1"
+
+
+class PipeServer:
+    """Accept multiple proxy instances without blocking the Qt thread."""
+
+    def __init__(self, on_frame: Callable[[object], None]) -> None:
+        self._on_frame = on_frame
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self.errors = 0
+
+    def start(self) -> None:
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, name="ffb-pipe", daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=1.0)
+
+    def _run(self) -> None:
+        if os.name != "nt":
+            self.errors += 1
+            return
+        import win32file  # ty: ignore[unresolved-import]
+        import win32pipe  # ty: ignore[unresolved-import]
+
+        while not self._stop.is_set():
+            try:
+                handle = win32pipe.CreateNamedPipe(
+                    PIPE_NAME,
+                    win32pipe.PIPE_ACCESS_INBOUND,
+                    win32pipe.PIPE_TYPE_BYTE | win32pipe.PIPE_READMODE_BYTE | win32pipe.PIPE_WAIT,
+                    win32pipe.PIPE_UNLIMITED_INSTANCES,
+                    64 * 1024,
+                    64 * 1024,
+                    250,
+                    _security_attributes(),
+                )
+                win32pipe.ConnectNamedPipe(handle, None)
+                buf = bytearray()
+                while not self._stop.is_set():
+                    status, chunk = win32file.ReadFile(handle, 64 * 1024)
+                    if status or not chunk:
+                        break
+                    buf.extend(chunk)
+                    try:
+                        for frame in iter_frames(buf):
+                            self._on_frame(frame)
+                    except ProtocolError:
+                        self.errors += 1
+                        buf.clear()
+                        break
+                win32file.CloseHandle(handle)
+            except (OSError, RuntimeError):
+                self.errors += 1
+
+
+def _security_attributes():
+    """Restrict the pipe DACL to the interactive owner SID when pywin32 allows it."""
+    try:
+        import win32con
+        import win32security  # ty: ignore[unresolved-import]
+
+        token = win32security.OpenProcessToken(
+            win32security.GetCurrentProcess(), win32security.TOKEN_QUERY
+        )
+        sid = win32security.GetTokenInformation(token, win32security.TokenUser)[0]
+        descriptor = win32security.SECURITY_DESCRIPTOR()
+        dacl = win32security.ACL()
+        dacl.AddAccessAllowedAce(win32security.ACL_REVISION, win32con.GENERIC_ALL, sid)
+        descriptor.SetSecurityDescriptorDacl(1, dacl, 0)
+        descriptor.SetSecurityDescriptorOwner(sid, 0)
+        attributes = win32security.SECURITY_ATTRIBUTES()
+        attributes.SECURITY_DESCRIPTOR = descriptor
+        return attributes
+    except (ImportError, OSError, RuntimeError, AttributeError):
+        return None

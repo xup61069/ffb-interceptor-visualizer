@@ -2,195 +2,168 @@
 // Copyright (c) 2026 Valmantas Paliksa
 #include "wrapper_dinput8.h"
 #include "wrapper_device8.h"
-#include "ffb_filter.h"
-#include "config.h"
-#include "logger.h"
-#include <memory>
+#include "telemetry.h"
+
+#include <new>
+#include <cstring>
 #include <string>
 
-// ============================================================================
-// Construction / destruction
-// ============================================================================
-template<bool U>
-WrapperDirectInput8<U>::WrapperDirectInput8(Base* real)
-    : m_real(real)
-{
-    LOG_INFO("WrapperDirectInput8<%s> created", U ? "W" : "A");
+namespace {
+
+std::string product_name(IDirectInputDevice8W* device) {
+    DIDEVICEINSTANCEW info{};
+    info.dwSize = sizeof(info);
+    if (FAILED(device->GetDeviceInfo(&info))) return {};
+    const int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+                                         info.tszProductName, -1, nullptr, 0,
+                                         nullptr, nullptr);
+    if (size <= 1) return {};
+    std::string result(static_cast<std::size_t>(size - 1), '\0');
+    WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, info.tszProductName, -1,
+                        result.data(), size, nullptr, nullptr);
+    return result;
 }
+
+std::string product_name(IDirectInputDevice8A* device) {
+    DIDEVICEINSTANCEA info{};
+    info.dwSize = sizeof(info);
+    if (FAILED(device->GetDeviceInfo(&info))) return {};
+    const int wide_size = MultiByteToWideChar(CP_ACP, 0, info.tszProductName,
+                                               -1, nullptr, 0);
+    if (wide_size <= 1) return {};
+    std::wstring wide(static_cast<std::size_t>(wide_size - 1), L'\0');
+    MultiByteToWideChar(CP_ACP, 0, info.tszProductName, -1, wide.data(), wide_size);
+    const int utf8_size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+                                              wide.c_str(), -1, nullptr, 0,
+                                              nullptr, nullptr);
+    if (utf8_size <= 1) return {};
+    std::string result(static_cast<std::size_t>(utf8_size - 1), '\0');
+    WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, wide.c_str(), -1,
+                        result.data(), utf8_size, nullptr, nullptr);
+    return result;
+}
+
+void emit_device(std::uint32_t id, REFGUID guid, HRESULT hr,
+                 const std::string& name) noexcept {
+    ffb::Event event{};
+    event.type = ffb::MessageType::DeviceCreated;
+    event.process_id = GetCurrentProcessId();
+    event.device_id = id;
+    event.effect_guid = guid;
+    event.hresult = hr;
+    strncpy_s(event.text, sizeof(event.text), name.c_str(), _TRUNCATE);
+    ffb::Telemetry::instance().emit(event);
+}
+
+}  // namespace
+
+template<bool U>
+WrapperDirectInput8<U>::WrapperDirectInput8(Base* real) : m_real(real) {}
 
 template<bool U>
 WrapperDirectInput8<U>::~WrapperDirectInput8() {
-    LOG_DEBUG("WrapperDirectInput8<%s> destroyed", U ? "W" : "A");
     if (m_real) m_real->Release();
 }
 
-// ============================================================================
-// IUnknown
-// ============================================================================
 template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::QueryInterface(REFIID riid, void** ppvObj) {
-    if (!ppvObj) return E_POINTER;
-
-    if (riid == IID_IUnknown) {
-        *ppvObj = static_cast<Base*>(this);
+HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::QueryInterface(REFIID riid,
+                                                                   void** out) {
+    if (!out) return E_POINTER;
+    *out = nullptr;
+    if (riid == IID_IUnknown ||
+        (U ? riid == IID_IDirectInput8W : riid == IID_IDirectInput8A)) {
+        *out = static_cast<Base*>(this);
         AddRef();
         return S_OK;
     }
-    if constexpr (U) {
-        if (riid == IID_IDirectInput8W) {
-            *ppvObj = static_cast<IDirectInput8W*>(this);
-            AddRef();
-            return S_OK;
-        }
-    } else {
-        if (riid == IID_IDirectInput8A) {
-            *ppvObj = static_cast<IDirectInput8A*>(this);
-            AddRef();
-            return S_OK;
-        }
-    }
-
-    *ppvObj = nullptr;
-    return m_real->QueryInterface(riid, ppvObj);
+    return m_real ? m_real->QueryInterface(riid, out) : E_NOINTERFACE;
 }
 
 template<bool U>
 ULONG STDMETHODCALLTYPE WrapperDirectInput8<U>::AddRef() {
-    return InterlockedIncrement(&m_refCount);
+    return static_cast<ULONG>(InterlockedIncrement(&m_ref_count));
 }
 
 template<bool U>
 ULONG STDMETHODCALLTYPE WrapperDirectInput8<U>::Release() {
-    ULONG c = InterlockedDecrement(&m_refCount);
-    if (c == 0) delete this;
-    return c;
-}
-
-// ============================================================================
-// CreateDevice — the main interception point
-// ============================================================================
-
-// Helper: query device product name (wide string) from a real device.
-static std::wstring queryDeviceName(IDirectInputDevice8W* dev) {
-    DIDEVICEINSTANCEW di{};
-    di.dwSize = sizeof(di);
-    if (SUCCEEDED(dev->GetDeviceInfo(&di)))
-        return di.tszProductName;
-    return L"<unknown>";
-}
-
-static std::wstring queryDeviceName(IDirectInputDevice8A* dev) {
-    DIDEVICEINSTANCEA di{};
-    di.dwSize = sizeof(di);
-    if (SUCCEEDED(dev->GetDeviceInfo(&di))) {
-        // Convert narrow product name to wide for consistent policy lookup
-        int len = MultiByteToWideChar(CP_ACP, 0, di.tszProductName, -1, nullptr, 0);
-        std::wstring ws(len, L'\0');
-        MultiByteToWideChar(CP_ACP, 0, di.tszProductName, -1, ws.data(), len);
-        if (!ws.empty() && ws.back() == L'\0') ws.pop_back();
-        return ws;
-    }
-    return L"<unknown>";
+    const ULONG count = static_cast<ULONG>(InterlockedDecrement(&m_ref_count));
+    if (count == 0) delete this;
+    return count;
 }
 
 template<bool U>
 HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::CreateDevice(
-    REFGUID rguid, DevIfaceT** lplpDevice, LPUNKNOWN punkOuter)
-{
-    if (!lplpDevice) return E_POINTER;
-
-    // Create the real device
-    DevIfaceT* realDevice = nullptr;
-    HRESULT hr = m_real->CreateDevice(rguid, &realDevice, punkOuter);
-    if (FAILED(hr) || !realDevice) {
-        *lplpDevice = nullptr;
+    REFGUID rguid, DevIfaceT** out_device, LPUNKNOWN outer) {
+    if (!out_device) return E_POINTER;
+    *out_device = nullptr;
+    if (!m_real) return DIERR_NOTINITIALIZED;
+    DevIfaceT* real = nullptr;
+    const HRESULT hr = m_real->CreateDevice(rguid, &real, outer);
+    if (FAILED(hr) || !real) {
+        emit_device(0, rguid, hr, {});
+        return hr;
+    }
+    if (outer != nullptr) {
+        emit_device(0, rguid, hr, {});
+        *out_device = real;
         return hr;
     }
 
-    // If wrapper is globally disabled, return unwrapped device
-    if (!Config::instance().enabled) {
-        *lplpDevice = realDevice;
+    const std::uint32_t device_id = ffb::Telemetry::instance().next_device_id();
+    if (U) {
+        emit_device(device_id, rguid, hr, product_name(
+            reinterpret_cast<IDirectInputDevice8W*>(real)));
+    } else {
+        emit_device(device_id, rguid, hr, product_name(
+            reinterpret_cast<IDirectInputDevice8A*>(real)));
+    }
+    auto* wrapped = new (std::nothrow) WrapperDevice8<U>(real, device_id);
+    if (!wrapped) {
+        *out_device = real;
         return hr;
     }
-
-    // Query name and resolve FFB policy
-    std::wstring name = queryDeviceName(realDevice);
-
-    bool ffbEnabled = true;
-    int  ffbScale   = 100;
-    Config::instance().getDevicePolicy(name.c_str(), ffbEnabled, ffbScale);
-
-    LOG_INFO("CreateDevice: [%ls]  FFB=%s  scale=%d%%",
-             name.c_str(),
-             ffbEnabled ? "allowed" : "BLOCKED",
-             ffbScale);
-
-    FFBPolicy policy;
-    policy.enabled = ffbEnabled;
-    policy.scale   = ffbScale;
-
-    auto filter = std::make_shared<FFBFilter>(policy, name);
-
-    // Wrap the device
-    *lplpDevice = new WrapperDevice8<U>(realDevice, filter);
+    *out_device = wrapped;
     return hr;
 }
 
-// ============================================================================
-// Pass-through methods
-// ============================================================================
 template<bool U>
 HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::EnumDevices(
-    DWORD dwDevType, EnumDevCbT lpCallback, LPVOID pvRef, DWORD dwFlags)
-{
-    return m_real->EnumDevices(dwDevType, lpCallback, pvRef, dwFlags);
+    DWORD type, EnumDevCbT callback, LPVOID ref, DWORD flags) {
+    return m_real->EnumDevices(type, callback, ref, flags);
 }
 
 template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::GetDeviceStatus(REFGUID rguidInstance) {
-    return m_real->GetDeviceStatus(rguidInstance);
+HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::GetDeviceStatus(REFGUID guid) {
+    return m_real->GetDeviceStatus(guid);
 }
 
 template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::RunControlPanel(
-    HWND hwndOwner, DWORD dwFlags)
-{
-    return m_real->RunControlPanel(hwndOwner, dwFlags);
+HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::RunControlPanel(HWND owner, DWORD flags) {
+    return m_real->RunControlPanel(owner, flags);
 }
 
 template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::Initialize(
-    HINSTANCE hinst, DWORD dwVersion)
-{
-    return m_real->Initialize(hinst, dwVersion);
+HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::Initialize(HINSTANCE instance, DWORD version) {
+    return m_real->Initialize(instance, version);
 }
 
 template<bool U>
-HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::FindDevice(
-    REFGUID rguidClass, const Char* ptszName, LPGUID pguidInstance)
-{
-    return m_real->FindDevice(rguidClass, ptszName, pguidInstance);
+HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::FindDevice(REFGUID guid, const Char* name,
+                                                               LPGUID out) {
+    return m_real->FindDevice(guid, name, out);
 }
 
 template<bool U>
 HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::EnumDevicesBySemantics(
-    const Char* ptszUserName, ActFmtT* lpdiActionFormat,
-    EnumSemCbT lpCallback, LPVOID pvRef, DWORD dwFlags)
-{
-    return m_real->EnumDevicesBySemantics(
-        ptszUserName, lpdiActionFormat, lpCallback, pvRef, dwFlags);
+    const Char* user, ActFmtT* format, EnumSemCbT callback, LPVOID ref, DWORD flags) {
+    return m_real->EnumDevicesBySemantics(user, format, callback, ref, flags);
 }
 
 template<bool U>
 HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::ConfigureDevices(
-    LPDICONFIGUREDEVICESCALLBACK lpdiCallback, CfgDevParamsT* lpdiCDParams,
-    DWORD dwFlags, LPVOID pvRefData)
-{
-    return m_real->ConfigureDevices(lpdiCallback, lpdiCDParams, dwFlags, pvRefData);
+    LPDICONFIGUREDEVICESCALLBACK callback, CfgDevParamsT* params, DWORD flags, LPVOID ref) {
+    return m_real->ConfigureDevices(callback, params, flags, ref);
 }
 
-// ============================================================================
-// Explicit instantiations
-// ============================================================================
-template class WrapperDirectInput8<false>;  // A
-template class WrapperDirectInput8<true>;   // W
+template class WrapperDirectInput8<false>;
+template class WrapperDirectInput8<true>;

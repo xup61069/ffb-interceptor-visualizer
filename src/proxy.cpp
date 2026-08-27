@@ -1,59 +1,43 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Valmantas Paliksa
 #include "proxy.h"
-#include "logger.h"
-#include <cstdio>
 
-OriginalDI8& OriginalDI8::instance() {
-    static OriginalDI8 s;
-    return s;
-}
+#include <cwchar>
 
 bool OriginalDI8::load() {
-    if (hModule) return true;
-
-    // Build path to the real system dinput8.dll
-    wchar_t sysDir[MAX_PATH];
-    GetSystemDirectoryW(sysDir, MAX_PATH);
-
-    wchar_t dllPath[MAX_PATH];
-    swprintf_s(dllPath, L"%s\\dinput8.dll", sysDir);
-
-    hModule = LoadLibraryW(dllPath);
-    if (!hModule) {
-        LOG_ERROR("Failed to load original dinput8.dll from %ls (error %lu)",
-                  dllPath, GetLastError());
-        return false;
-    }
-
-    DirectInput8Create  = reinterpret_cast<PFN_DirectInput8Create>(
-                              GetProcAddress(hModule, "DirectInput8Create"));
-    DllCanUnloadNow     = reinterpret_cast<PFN_DllCanUnloadNow>(
-                              GetProcAddress(hModule, "DllCanUnloadNow"));
-    DllGetClassObject   = reinterpret_cast<PFN_DllGetClassObject>(
-                              GetProcAddress(hModule, "DllGetClassObject"));
-    DllRegisterServer   = reinterpret_cast<PFN_DllRegisterServer>(
-                              GetProcAddress(hModule, "DllRegisterServer"));
-    DllUnregisterServer = reinterpret_cast<PFN_DllUnregisterServer>(
-                              GetProcAddress(hModule, "DllUnregisterServer"));
-
-    if (!DirectInput8Create) {
-        LOG_ERROR("Could not find DirectInput8Create in original dinput8.dll");
-        return false;
-    }
-
-    LOG_INFO("Loaded original dinput8.dll from %ls", dllPath);
-    return true;
+    static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
+    static BOOL loaded = FALSE;
+    InitOnceExecuteOnce(&once, [](PINIT_ONCE, PVOID, PVOID*) -> BOOL {
+        auto& original = OriginalDI8::instance();
+        original.hModule = LoadLibraryExW(L"dinput8.dll", nullptr,
+                                          LOAD_LIBRARY_SEARCH_SYSTEM32);
+        if (!original.hModule) {
+            wchar_t system_directory[MAX_PATH]{};
+            const UINT length = GetSystemDirectoryW(system_directory, MAX_PATH);
+            if (length > 0 && length < MAX_PATH - 12) {
+                wchar_t path[MAX_PATH]{};
+                swprintf_s(path, L"%s\\dinput8.dll", system_directory);
+                original.hModule = LoadLibraryW(path);
+            }
+        }
+        if (!original.hModule) return TRUE;
+        original.DirectInput8Create = reinterpret_cast<PFN_DirectInput8Create>(
+            GetProcAddress(original.hModule, "DirectInput8Create"));
+        original.DllCanUnloadNow = reinterpret_cast<PFN_DllCanUnloadNow>(
+            GetProcAddress(original.hModule, "DllCanUnloadNow"));
+        original.DllGetClassObject = reinterpret_cast<PFN_DllGetClassObject>(
+            GetProcAddress(original.hModule, "DllGetClassObject"));
+        original.DllRegisterServer = reinterpret_cast<PFN_DllRegisterServer>(
+            GetProcAddress(original.hModule, "DllRegisterServer"));
+        original.DllUnregisterServer = reinterpret_cast<PFN_DllUnregisterServer>(
+            GetProcAddress(original.hModule, "DllUnregisterServer"));
+        loaded = original.DirectInput8Create != nullptr;
+        return TRUE;
+    }, nullptr, nullptr);
+    return loaded != FALSE;
 }
 
-void OriginalDI8::unload() {
-    if (hModule) {
-        FreeLibrary(hModule);
-        hModule = nullptr;
-    }
-    DirectInput8Create  = nullptr;
-    DllCanUnloadNow     = nullptr;
-    DllGetClassObject   = nullptr;
-    DllRegisterServer   = nullptr;
-    DllUnregisterServer = nullptr;
+OriginalDI8& OriginalDI8::instance() {
+    static OriginalDI8 original;
+    return original;
 }
