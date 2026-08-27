@@ -23,7 +23,9 @@ $pyproject = Get-Content -Raw -LiteralPath 'viewer/pyproject.toml'
 if ($cmake -notmatch "project\(ffb_interceptor VERSION $([regex]::Escape($expectedVersion)) LANGUAGES CXX\)") {
     throw "CMake project version does not match $tag"
 }
-if ($pyproject -notmatch "(?m)^version = `"$([regex]::Escape($expectedVersion))`"$") {
+$viewerVersionPattern = '(?m)^\s*version\s*=\s*"' +
+    [regex]::Escape($expectedVersion) + '"\s*\r?$'
+if ($pyproject -notmatch $viewerVersionPattern) {
     throw "Viewer package version does not match $tag"
 }
 
