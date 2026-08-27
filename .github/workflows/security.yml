@@ -17,10 +17,10 @@ jobs:
       contents: read
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@6f5948dfacef28e207b48d0905cf90c03365536d # v3
+      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
         with:
           languages: c-cpp, python
       - name: Build C++ for CodeQL
@@ -29,15 +29,15 @@ jobs:
           $devcmd = 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat'
           cmd.exe /d /c "call `"$devcmd`" -arch=x64 >nul && cmake -S . -B build\codeql -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build\codeql --target dinput8"
           exit $LASTEXITCODE
-      - uses: github/codeql-action/analyze@6f5948dfacef28e207b48d0905cf90c03365536d # v3
+      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
 
   dependency-audit:
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'
       - run: python -m pip install uv pip-audit
