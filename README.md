@@ -6,7 +6,7 @@ parameters in a live viewer. It forwards every DirectInput call and HRESULT
 unchanged. A graph labelled **Command Peak/RMS** describes the selected API
 channel; it is not a measurement of motor torque.
 
-Version 0.1.3 supports a C++17 `dinput8.dll` proxy for x86 and x64 and a
+Version 0.1.4 supports a C++17 `dinput8.dll` proxy for x86 and x64 and a
 Python 3.12+ x64 PySide6/pyqtgraph viewer. The proxy is derived from
 [walmis/dcs-force-feedback-fix](https://github.com/walmis/dcs-force-feedback-fix)
 v0.2 (MIT) and keeps its history. New code is GPL-3.0-only.
@@ -57,8 +57,12 @@ uv run ffb-viewer
 The viewer owns the multi-instance named-pipe server
 `\\.\pipe\ffb-interceptor-v1`. Data stays in memory unless the user presses
 an export control. Use the producer/device/effect selectors, 1/5/10/30 second
-window, channel selector, pause and event marker controls to inspect a bounded
-rolling buffer. `Export CSV`, `Export PNG` and `Save .ffbtrace` are explicit
+window, channel selector and condition-axis selector, pause and event marker
+controls to inspect a bounded rolling buffer. The channel selector exposes all
+observed Constant, Ramp and Periodic parameters plus Condition offset,
+coefficient, saturation and deadband fields; a missing parameter is shown as
+no sample rather than synthesized force. `Export CSV`, `Export PNG` and
+`Save .ffbtrace` are explicit
 user actions; the versioned trace contains relative time, stable in-process IDs
 and redacted command fields only (never full paths, serials, account names or
 host names). The raw-details pane shows the last selected command without
@@ -81,7 +85,8 @@ to stay below 100 microseconds p99 at 1,000+ events/second, named-pipe
 ingestion below 5 milliseconds p99 at the same rate, and the Qt refresh path
 to remain below a 30 FPS frame budget while its timer runs at 60 Hz. The pipe
 tests use the actual current-user DACL, fragmented writes, reconnects and a
-kernel-reported Hello PID check.
+kernel-reported Hello PID check. The security workflow also scans complete Git
+history with gitleaks and lints every workflow with actionlint and zizmor.
 
 Releases are built only from an existing `vX.Y.Z` tag: CI checks out that tag,
 then verifies the tag commit and both package versions before building,
@@ -97,7 +102,7 @@ and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Status
 
-v0.1.3 is a prerelease and is marked `UNSIGNED EXPERIMENTAL`. Synthetic
+v0.1.4 is a prerelease and is marked `UNSIGNED EXPERIMENTAL`. Synthetic
 protocol/queue tests are the release gate. Real hardware or commercial-game
 results are not compatibility claims unless accompanied by explicit
 authorization and reproducible evidence.

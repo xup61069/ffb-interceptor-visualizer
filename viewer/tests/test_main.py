@@ -11,6 +11,22 @@ from ffb_visualizer.main import MainWindow
 from .support import frame
 
 
+def test_condition_channel_is_plotted_without_fabricated_samples(qtbot) -> None:
+    window = MainWindow(start_server=False)
+    qtbot.addWidget(window)
+    window._enqueue(frame(sequence=1, qpc_ticks=1_000_000_000))
+    window._refresh()
+
+    condition_index = window.channel_box.findData("condition_offset")
+    assert condition_index >= 0
+    window.channel_box.setCurrentIndex(condition_index)
+    window._refresh()
+    _, values = window.curve.getData()
+    assert len(values) == 1
+    assert "Condition offset" in window.status.text()
+    assert "motor torque" not in window.status.text().lower()
+
+
 @pytest.mark.performance
 def test_ui_uses_a_60hz_timer_and_sustains_at_least_30fps(qtbot) -> None:
     window = MainWindow(start_server=False)

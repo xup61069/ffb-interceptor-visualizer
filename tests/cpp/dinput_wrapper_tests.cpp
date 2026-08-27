@@ -3,11 +3,18 @@
 #include "wrapper_dinput8.h"
 
 #include <cassert>
+#include <cstdint>
 
 namespace {
 
 class FakeDirectInput final : public IDirectInput8A, public IDirectInput8W {
 public:
+    LPUNKNOWN last_outer = nullptr;
+    IDirectInputDevice8A* aggregated_device_a =
+        reinterpret_cast<IDirectInputDevice8A*>(static_cast<std::uintptr_t>(0x1234));
+    IDirectInputDevice8W* aggregated_device_w =
+        reinterpret_cast<IDirectInputDevice8W*>(static_cast<std::uintptr_t>(0x5678));
+
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** out) override {
         if (!out) return E_POINTER;
         *out = nullptr;
@@ -29,11 +36,17 @@ public:
     }
     ULONG refs() const { return m_refs; }
 
-    HRESULT STDMETHODCALLTYPE CreateDevice(REFGUID, IDirectInputDevice8A**, LPUNKNOWN) override {
-        return E_NOTIMPL;
+    HRESULT STDMETHODCALLTYPE CreateDevice(REFGUID, IDirectInputDevice8A** out,
+                                           LPUNKNOWN outer) override {
+        last_outer = outer;
+        *out = aggregated_device_a;
+        return S_FALSE;
     }
-    HRESULT STDMETHODCALLTYPE CreateDevice(REFGUID, IDirectInputDevice8W**, LPUNKNOWN) override {
-        return E_NOTIMPL;
+    HRESULT STDMETHODCALLTYPE CreateDevice(REFGUID, IDirectInputDevice8W** out,
+                                           LPUNKNOWN outer) override {
+        last_outer = outer;
+        *out = aggregated_device_w;
+        return S_FALSE;
     }
     HRESULT STDMETHODCALLTYPE EnumDevices(DWORD, LPDIENUMDEVICESCALLBACKA, LPVOID, DWORD) override {
         return E_NOTIMPL;
@@ -73,6 +86,14 @@ int main() {
     auto* fake = new FakeDirectInput();
     auto* wrapped_a = new WrapperDirectInput8A(static_cast<IDirectInput8A*>(fake));
     assert(wrapped_a && wrapped_a->valid());
+
+    // Aggregated objects are deliberately returned untouched: wrapping them
+    // would violate the COM aggregation contract and could change identity.
+    LPUNKNOWN outer = static_cast<IUnknown*>(static_cast<IDirectInput8A*>(fake));
+    IDirectInputDevice8A* aggregated = nullptr;
+    assert(wrapped_a->CreateDevice(GUID_ConstantForce, &aggregated, outer) == S_FALSE);
+    assert(aggregated == fake->aggregated_device_a);
+    assert(fake->last_outer == outer);
 
     void* out = nullptr;
     assert(wrapped_a->QueryInterface(IID_IDirectInput8W, &out) == S_OK);

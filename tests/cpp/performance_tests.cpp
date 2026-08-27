@@ -8,6 +8,7 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <vector>
 
@@ -45,6 +46,20 @@ int main() {
         std::chrono::duration<double>(Clock::now() - wall_start).count();
 
     assert(telemetry.dropped_for_test() == 0);
+    telemetry.end_benchmark_for_test();
+
+    // A saturated preallocated queue must shed telemetry rather than block a
+    // DirectInput caller or allocate another node.
+    assert(telemetry.begin_benchmark_for_test());
+    constexpr std::size_t kOverflowSamples = 2'000;
+    for (std::size_t index = 0; index < kOverflowSamples; ++index) {
+        telemetry.emit(event);
+    }
+    const std::size_t drained = telemetry.drain_for_test();
+    const auto dropped = telemetry.dropped_for_test();
+    assert(dropped > 0);
+    assert(static_cast<std::uint64_t>(drained) + dropped ==
+           static_cast<std::uint64_t>(kOverflowSamples));
     telemetry.end_benchmark_for_test();
 
     std::sort(samples.begin(), samples.end());

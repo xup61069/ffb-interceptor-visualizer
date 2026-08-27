@@ -7,14 +7,19 @@ on:
     branches: [master]
   pull_request:
 
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions: {}
 
 jobs:
   codeql:
+    name: codeql
     permissions:
-      security-events: write
-      actions: read
-      contents: read
+      security-events: write # upload CodeQL results for this repository
+      actions: read # allow CodeQL to read workflow metadata
+      contents: read # checkout the audited source
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -32,6 +37,7 @@ jobs:
       - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
 
   dependency-audit:
+    name: dependency-audit
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -43,3 +49,25 @@ jobs:
       - run: python -m pip install uv pip-audit
       - working-directory: viewer
         run: uv sync --extra dev; uv run pip-audit
+
+  supply-chain:
+    name: history-and-workflow-audit
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned scanners
+        shell: pwsh
+        run: |
+          go install github.com/gitleaks/gitleaks/v8@v8.30.1
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          "$(go env GOPATH)\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          python -m pip install --disable-pip-version-check zizmor==1.29.0
+      - name: Scan complete Git history for secrets
+        run: gitleaks git --redact --log-opts="--all"
+      - name: Lint GitHub Actions workflows
+        run: actionlint
+      - name: Audit workflow supply-chain policy
+        run: zizmor --pedantic .github/workflows

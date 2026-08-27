@@ -12,10 +12,31 @@ from queue import Empty, Full, Queue
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
-from .model import EventStore
+from .model import (
+    EventStore,
+    command_channel_scale,
+    command_channel_unit,
+    command_channel_value,
+)
 from .pipe_server import PipeServer
 from .protocol import Frame
 from .trace import trace_payload
+
+_CHANNEL_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("Constant magnitude", "constant_magnitude"),
+    ("Ramp start", "ramp_start"),
+    ("Ramp end", "ramp_end"),
+    ("Periodic magnitude", "periodic_magnitude"),
+    ("Periodic offset", "periodic_offset"),
+    ("Periodic phase", "periodic_phase"),
+    ("Periodic period", "periodic_period"),
+    ("Condition offset", "condition_offset"),
+    ("Condition positive coefficient", "condition_positive_coefficient"),
+    ("Condition negative coefficient", "condition_negative_coefficient"),
+    ("Condition positive saturation", "condition_positive_saturation"),
+    ("Condition negative saturation", "condition_negative_saturation"),
+    ("Condition deadband", "condition_dead_band"),
+)
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -31,7 +52,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._last_filter_received = -1
         self._last_filter_window = ""
         self.plot = pg.PlotWidget()
-        self.plot.setLabel("left", "Command value (normalized API units)")
+        self.plot.setLabel("left", "Selected command parameter")
         self.plot.setLabel("bottom", "Relative time", units="s")
         self.curve = self.plot.plot(pen=pg.mkPen("#63d6ff", width=2))
         self.details = QtWidgets.QPlainTextEdit()
@@ -54,8 +75,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pause = QtWidgets.QPushButton("Pause")
         self.pause.clicked.connect(self._toggle_pause)
         self.channel_box = QtWidgets.QComboBox()
-        self.channel_box.addItems(["Magnitude", "Ramp end", "Periodic magnitude"])
+        for label, channel in _CHANNEL_OPTIONS:
+            self.channel_box.addItem(label, channel)
         self.channel_box.currentIndexChanged.connect(self._refresh)
+        self.condition_axis_box = QtWidgets.QComboBox()
+        for axis in range(8):
+            self.condition_axis_box.addItem(f"Condition axis {axis}", axis)
+        self.condition_axis_box.currentIndexChanged.connect(self._refresh)
         export = QtWidgets.QPushButton("Export CSV")
         export.clicked.connect(self._export_csv)
         export_png = QtWidgets.QPushButton("Export PNG")
@@ -71,6 +97,7 @@ class MainWindow(QtWidgets.QMainWindow):
         toolbar.addWidget(self.device_box)
         toolbar.addWidget(self.effect_box)
         toolbar.addWidget(self.channel_box)
+        toolbar.addWidget(self.condition_axis_box)
         toolbar.addWidget(self.pause)
         toolbar.addWidget(export)
         toolbar.addWidget(export_png)
@@ -107,29 +134,35 @@ class MainWindow(QtWidgets.QMainWindow):
             self.store.add(frame)
         self._update_filters()
         events = self._visible_events()
-        if events:
+        channel = str(self.channel_box.currentData())
+        condition_axis = int(self.condition_axis_box.currentData())
+        scale = command_channel_scale(channel)
+        unit = command_channel_unit(channel)
+        self.plot.setLabel("left", f"{self.channel_box.currentText()} ({unit})")
+        samples = [
+            (event, value)
+            for event in events
+            if (value := command_channel_value(event, channel, condition_axis)) is not None
+        ]
+        if samples:
             origin = events[0].qpc_ticks
-            xs = [(event.qpc_ticks - origin) / self.store.qpc_frequency for event in events]
-            channel = self.channel_box.currentIndex()
-            if channel == 1:
-                ys = [event.ramp_end / 10_000.0 for event in events]
-            elif channel == 2:
-                ys = [event.periodic_magnitude / 10_000.0 for event in events]
-            else:
-                ys = [event.magnitude / 10_000.0 for event in events]
+            xs = [(event.qpc_ticks - origin) / self.store.qpc_frequency for event, _ in samples]
+            ys = [value / scale for _, value in samples]
             self.curve.setData(xs, ys)
-            selected_channel = ("magnitude", "ramp_end", "periodic_magnitude")[channel]
             peak, rms = self.store.command_peak_rms(
-                float(self.window_box.currentText()), events, selected_channel
+                float(self.window_box.currentText()), events, channel, condition_axis
             )
             self.status.setText(
-                f"Command Peak/RMS ({self.channel_box.currentText()}) {peak:.3f}/{rms:.3f} · "
+                f"Command Peak/RMS ({self.channel_box.currentText()}, {unit}) {peak:.3f}/{rms:.3f} · "
                 f"events {self.store.received} · "
                 f"drops {self.store.dropped} · pipe errors {self.server.errors}"
             )
         else:
+            self.curve.setData([], [])
             self.status.setText(
-                f"events {self.store.received} · drops {self.store.dropped} · pipe errors {self.server.errors}"
+                f"No {self.channel_box.currentText()} samples in this window · "
+                f"events {self.store.received} · drops {self.store.dropped} · "
+                f"pipe errors {self.server.errors}"
             )
         self._update_details(events[-1] if events else None)
 
@@ -216,6 +249,9 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         events = self._visible_events()
         origin = events[0].qpc_ticks if events else 0
+        channel = str(self.channel_box.currentData())
+        condition_axis = int(self.condition_axis_box.currentData())
+        scale = command_channel_scale(channel)
         with Path(path).open("w", newline="", encoding="utf-8") as stream:
             writer = csv.writer(stream)
             writer.writerow(
@@ -226,10 +262,14 @@ class MainWindow(QtWidgets.QMainWindow):
                     "command",
                     "device_id",
                     "effect_id",
-                    "magnitude",
+                    "channel",
+                    "condition_axis",
+                    "command_value",
+                    "command_unit",
                 ]
             )
             for event in events:
+                value = command_channel_value(event, channel, condition_axis)
                 writer.writerow(
                     [
                         (event.qpc_ticks - origin) / self.store.qpc_frequency,
@@ -238,7 +278,10 @@ class MainWindow(QtWidgets.QMainWindow):
                         event.command,
                         event.device_id,
                         event.effect_id,
-                        event.magnitude,
+                        channel,
+                        condition_axis,
+                        "" if value is None else value / scale,
+                        command_channel_unit(channel),
                     ]
                 )
 

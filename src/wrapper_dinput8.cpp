@@ -199,7 +199,13 @@ HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::CreateDevice(
         emit_device(device_id, rguid, hr, {});
     }
     auto* wrapped = new (std::nothrow) WrapperDevice8<U>(real, device_id);
-    if (!wrapped) {
+    // WrapperDevice8 allocates a shared A/W control block.  If that
+    // allocation fails, returning the partially constructed wrapper would
+    // turn an otherwise valid DirectInput device into a broken COM object.
+    // Preserve fail-open semantics by discarding it and returning the exact
+    // real interface the system DLL supplied.
+    if (!wrapped || !wrapped->valid()) {
+        delete wrapped;
         *out_device = real;
         return hr;
     }

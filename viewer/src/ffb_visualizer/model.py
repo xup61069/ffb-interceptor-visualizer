@@ -11,6 +11,80 @@ from itertools import pairwise
 
 from .protocol import Frame
 
+_PERIODIC_EFFECT_KINDS = frozenset((3, 4, 5, 6, 7))
+_CONDITION_EFFECT_KINDS = frozenset((8, 9, 10, 11))
+_NORMALIZED_COMMAND_CHANNELS = frozenset(
+    (
+        "magnitude",
+        "constant_magnitude",
+        "ramp_start",
+        "ramp_end",
+        "periodic_magnitude",
+        "condition_positive_coefficient",
+        "condition_negative_coefficient",
+        "condition_positive_saturation",
+        "condition_negative_saturation",
+    )
+)
+
+
+def command_channel_value(event: Frame, channel: str, condition_axis: int = 0) -> int | None:
+    """Return one observed command parameter, never a synthesized force.
+
+    ``None`` means that the event does not carry the selected parameter.  In
+    particular, condition values are only available for a real condition
+    effect and never inferred from a Constant/Ramp/Periodic command.
+    """
+
+    if channel == "magnitude":
+        return event.magnitude
+    if channel == "constant_magnitude":
+        return event.magnitude if event.effect_kind == 1 else None
+    if channel == "ramp_start":
+        return event.ramp_start if event.effect_kind == 2 else None
+    if channel == "ramp_end":
+        return event.ramp_end if event.effect_kind == 2 else None
+    if channel == "periodic_magnitude":
+        return event.periodic_magnitude if event.effect_kind in _PERIODIC_EFFECT_KINDS else None
+    if channel == "periodic_offset":
+        return event.periodic_offset if event.effect_kind in _PERIODIC_EFFECT_KINDS else None
+    if channel == "periodic_phase":
+        return event.periodic_phase if event.effect_kind in _PERIODIC_EFFECT_KINDS else None
+    if channel == "periodic_period":
+        return event.periodic_period if event.effect_kind in _PERIODIC_EFFECT_KINDS else None
+    if event.effect_kind not in _CONDITION_EFFECT_KINDS:
+        return None
+    if not 0 <= condition_axis < len(event.conditions):
+        return None
+    condition = event.conditions[condition_axis]
+    values = {
+        "condition_offset": condition.offset,
+        "condition_positive_coefficient": condition.positive_coefficient,
+        "condition_negative_coefficient": condition.negative_coefficient,
+        "condition_positive_saturation": condition.positive_saturation,
+        "condition_negative_saturation": condition.negative_saturation,
+        "condition_dead_band": condition.dead_band,
+    }
+    return values.get(channel)
+
+
+def command_channel_scale(channel: str) -> float:
+    """Normalize only DirectInput force-scale fields for a readable graph."""
+
+    return 10_000.0 if channel in _NORMALIZED_COMMAND_CHANNELS else 1.0
+
+
+def command_channel_unit(channel: str) -> str:
+    """Describe the API unit without implying physical motor torque."""
+
+    if channel in _NORMALIZED_COMMAND_CHANNELS:
+        return "normalized DirectInput command units"
+    if channel == "periodic_period":
+        return "DirectInput time units"
+    if channel == "periodic_phase":
+        return "DirectInput phase units"
+    return "raw DirectInput command units"
+
 
 @dataclass(slots=True)
 class EventStore:
@@ -59,28 +133,27 @@ class EventStore:
         seconds: float,
         events: list[Frame] | None = None,
         channel: str = "magnitude",
+        condition_axis: int = 0,
     ) -> tuple[float, float]:
         """Return time-weighted command peak/RMS for the selected window."""
         events = self.window(seconds) if events is None else events
-        if not events:
+        samples = [
+            (event, value)
+            for event in events
+            if (value := command_channel_value(event, channel, condition_axis)) is not None
+        ]
+        if not samples:
             return 0.0, 0.0
-
-        def value(event: Frame) -> int:
-            if channel == "ramp_end":
-                return event.ramp_end
-            if channel == "periodic_magnitude":
-                return event.periodic_magnitude
-            return event.magnitude
-
-        peak = max(abs(value(event)) for event in events) / 10_000.0
+        scale = command_channel_scale(channel)
+        peak = max(abs(value) for _, value in samples) / scale
         weighted = 0.0
         total = 0
-        for previous, current in pairwise(events):
+        for (previous, previous_value), (current, _) in pairwise(samples):
             delta = max(0, current.qpc_ticks - previous.qpc_ticks)
-            weighted += (value(previous) / 10_000.0) ** 2 * delta
+            weighted += (previous_value / scale) ** 2 * delta
             total += delta
         if total == 0:
-            return peak, abs(value(events[-1])) / 10_000.0
+            return peak, abs(samples[-1][1]) / scale
         return peak, math.sqrt(weighted / total)
 
     def mark_latest(self, label: str = "marker") -> None:

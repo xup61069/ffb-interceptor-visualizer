@@ -10,16 +10,22 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: write
-  id-token: write
-  attestations: write
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions: {}
 
 env:
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   build:
+    name: package-and-attest
+    permissions:
+      contents: write # upload the explicitly requested release assets
+      id-token: write # mint the OIDC identity for build provenance
+      attestations: write # publish provenance for each release asset
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
