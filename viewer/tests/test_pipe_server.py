@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import threading
 import time
 from contextlib import contextmanager
@@ -121,6 +122,11 @@ def test_windows_pipe_ingestion_p99_under_five_milliseconds_at_1000_events_per_s
 
     server = pipe_server.PipeServer(on_frame)
     server.start()
+    # The production proxy is a separate C++ process.  Keep the synthetic
+    # writer/reader harness from measuring Python's default 5 ms GIL scheduling
+    # quantum instead of the pipe parser's latency.
+    previous_switch_interval = sys.getswitchinterval()
+    sys.setswitchinterval(0.001)
     try:
         with _connect_writer() as writer:
             _write(writer, frame_bytes(message_type=1, sequence=0))
@@ -129,6 +135,9 @@ def test_windows_pipe_ingestion_p99_under_five_milliseconds_at_1000_events_per_s
                 encoded = frame_bytes(sequence=sequence)
                 sent[sequence] = time.perf_counter_ns()
                 _write(writer, encoded)
+                # Let the reader thread run; a real proxy is a separate
+                # process and does not hold the test process' GIL.
+                time.sleep(0)
             production_elapsed = time.perf_counter_ns() - production_start
         assert delivered.wait(10.0)
         rate = total / (production_elapsed / 1_000_000_000)
@@ -138,5 +147,6 @@ def test_windows_pipe_ingestion_p99_under_five_milliseconds_at_1000_events_per_s
         assert rate >= 1_000.0
         assert p99_nanoseconds < 5_000_000
     finally:
+        sys.setswitchinterval(previous_switch_interval)
         server.stop()
         assert not server._thread or not server._thread.is_alive()
