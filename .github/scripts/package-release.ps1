@@ -18,7 +18,48 @@ Compress-Archive -Path build/x64-release/dinput8.dll -DestinationPath release/ff
 Compress-Archive -Path build/x86-release/dinput8.dll -DestinationPath release/ffb-proxy-x86.zip -Force
 Push-Location viewer
 uv sync --extra dev
-uv run pyinstaller --noconfirm --clean --onedir --name ffb-viewer src/ffb_visualizer/main.py
+$previousPath = $env:PATH
+$system32 = [System.IO.Path]::GetFullPath((Join-Path $env:SystemRoot 'System32')).TrimEnd('\\')
+$safePathEntries = foreach ($entry in $previousPath -split ';') {
+    if ([string]::IsNullOrWhiteSpace($entry)) {
+        continue
+    }
+    $isSystem32 = [System.IO.Path]::GetFullPath($entry).TrimEnd('\\') -ieq $system32
+    if ($isSystem32 -or -not (Test-Path (Join-Path $entry 'icuuc.dll'))) {
+        $entry
+    }
+}
+try {
+    # Avoid bundling an unrelated ICU DLL exposed by the build host's PATH.
+    $env:PATH = [string]::Join(';', $safePathEntries)
+    uv run pyinstaller --noconfirm --clean --onedir --name ffb-viewer --paths src pyinstaller_entry.py
+}
+finally {
+    $env:PATH = $previousPath
+}
+$viewerInternal = Join-Path (Get-Location) 'dist/ffb-viewer/_internal'
+if (Get-ChildItem -LiteralPath $viewerInternal -File -Filter 'icu*.dll') {
+    throw 'Refusing to package host-provided ICU DLLs with the viewer.'
+}
+$previousQtPlatform = $env:QT_QPA_PLATFORM
+try {
+    $env:QT_QPA_PLATFORM = 'offscreen'
+    $viewerProcess = Start-Process -FilePath (Join-Path (Get-Location) 'dist/ffb-viewer/ffb-viewer.exe') -WindowStyle Hidden -PassThru
+    Start-Sleep -Seconds 2
+    if ($viewerProcess.HasExited) {
+        throw "Packaged viewer exited during smoke test with code $($viewerProcess.ExitCode)."
+    }
+    Stop-Process -Id $viewerProcess.Id -ErrorAction Stop
+    $viewerProcess.WaitForExit()
+}
+finally {
+    if ($null -eq $previousQtPlatform) {
+        Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+    }
+    else {
+        $env:QT_QPA_PLATFORM = $previousQtPlatform
+    }
+}
 uv run cyclonedx-py environment --pyproject pyproject.toml --output-reproducible -o ../release/sbom.cdx.json
 Compress-Archive -Path dist/ffb-viewer -DestinationPath ../release/ffb-viewer-x64.zip -Force
 Pop-Location

@@ -20,4 +20,7 @@ git checkout vX.Y.Z
 
 Set `RELEASE_TAG=vX.Y.Z` before invoking the scripts locally. The packaging
 script removes only the repository-local ignored `release/` directory before
-recreating it, preventing a previous local asset from being included.
+recreating it, preventing a previous local asset from being included. It also
+uses a clean DLL search path for PyInstaller and starts the packaged viewer in
+offscreen mode before archiving it; a Viewer that exits during this smoke check
+cannot be published.

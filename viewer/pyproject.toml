@@ -38,6 +38,9 @@ packages = ["src/ffb_visualizer"]
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint.isort]
+known-first-party = ["ffb_visualizer"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
