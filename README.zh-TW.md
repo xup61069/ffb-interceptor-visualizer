@@ -5,7 +5,7 @@
 轉發。圖表的 **Command Peak/RMS** 只代表選定 API 通道的命令值，不是方向盤
 馬達扭力量測。
 
-v0.1.18 提供 C++17 的 x86/x64 `dinput8.dll` proxy，以及 Python 3.12+、
+v0.1.19 提供 C++17 的 x86/x64 `dinput8.dll` proxy，以及 Python 3.12+、
 PySide6/pyqtgraph 的 x64 viewer。proxy 源自
 [walmis/dcs-force-feedback-fix](https://github.com/walmis/dcs-force-feedback-fix)
 v0.2（MIT）並保留完整歷史；新增程式採 GPL-3.0-only。
@@ -26,6 +26,8 @@ viewer 提供 producer／device／effect 篩選、1／5／10／30 秒視窗、�
 `Export CSV`、`Export PNG` 或 `Save .ffbtrace` 後才會由使用者主動保存。
 `.ffbtrace` 是版本化格式，只含相對時間、行程內 stable ID 與已遮罩的命令欄位，
 不含完整路徑、序號、帳號或主機名。
+CSV 匯出另含受界限的 producer basename 與 process ID，讓多個 producer 同時選取時
+仍可辨識 device/effect ID。
 
 proxy 的 A/W COM 介面共用控制區塊，跨介面 `QueryInterface(IUnknown)`、AddRef
 與 Release 維持同一個 identity 與 refcount；aggregation 與未知介面則原樣轉發。

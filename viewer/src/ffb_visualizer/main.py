@@ -20,7 +20,7 @@ from .model import (
 )
 from .pipe_server import PipeServer
 from .protocol import Frame
-from .trace import trace_payload
+from .trace import producer_basename, trace_payload
 
 _CHANNEL_OPTIONS: tuple[tuple[str, str], ...] = (
     ("Constant magnitude", "constant_magnitude"),
@@ -303,6 +303,11 @@ class MainWindow(QtWidgets.QMainWindow):
         channel = str(self.channel_box.currentData())
         condition_axis = int(self.condition_axis_box.currentData())
         scale = command_channel_scale(channel)
+        producers = {
+            event.process_id: producer_basename(event.text)
+            for event in self.store.events
+            if event.message_type == 1 and event.text
+        }
         with Path(path).open("w", newline="", encoding="utf-8") as stream:
             writer = csv.writer(stream)
             writer.writerow(
@@ -311,6 +316,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     "message_type",
                     "effect_kind",
                     "command",
+                    "producer",
+                    "process_id",
                     "device_id",
                     "effect_id",
                     "channel",
@@ -327,6 +334,8 @@ class MainWindow(QtWidgets.QMainWindow):
                         event.message_type,
                         event.effect_kind,
                         event.command,
+                        producers.get(event.process_id, ""),
+                        event.process_id,
                         event.device_id,
                         event.effect_id,
                         channel,

@@ -31,6 +31,8 @@ Highlights:
 - A/W wrapper construction now validates every alias allocation and preserves
   the caller-owned COM reference when unpublished wrapper cleanup falls back
   to the original interface.
+- CSV exports now include bounded producer basenames and process IDs, while
+  v1 traces retain an additive multi-producer basename map.
 - CI validates proxy x86/x64 and viewer Python 3.12/3.13; clean-clone rebuilds
   and synthetic protocol/queue gates are required before publication.
 

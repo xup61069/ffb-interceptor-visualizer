@@ -2,8 +2,11 @@
 
 The viewer writes a JSON trace only after the user chooses **Save .ffbtrace**.
 The top-level object has `format: "ffbtrace"`, `version: 1`, the Hello QPC
-frequency, a basename-only `producer` value, an `events` array and user-created
-`markers`. Event timestamps are relative seconds from the first exported event.
+frequency, a basename-only `producer` value, a `producers` array, an `events`
+array and user-created `markers`. `producer` remains the first producer name
+for older readers; `producers` maps every observed process ID to its basename
+so multi-producer exports remain attributable. Event timestamps are relative
+seconds from the first exported event.
 
 Each event contains the protocol message type, effect kind/command, sequence,
 HRESULT, stable process/device/effect IDs (device/effect IDs are scoped to the

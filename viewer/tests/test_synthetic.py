@@ -6,6 +6,8 @@ from ffb_visualizer.model import EventStore, command_channel_value
 from ffb_visualizer.protocol import Condition, Frame
 from ffb_visualizer.trace import trace_payload
 
+from .support import frame
+
 
 def test_synthetic_ingestion_rate_and_metrics() -> None:
     store = EventStore(capacity=2_000)
@@ -106,6 +108,7 @@ def test_selected_channel_and_user_marker_are_bounded_metadata() -> None:
     assert exported["format"] == "ffbtrace"
     assert exported["version"] == 1
     assert exported["producer"] == "sample.exe"
+    assert exported["producers"] == [{"process_id": 42, "name": "sample.exe"}]
     assert "C:\\Games" not in str(exported)
     assert exported["markers"] == [{"relative_seconds": 1.0, "label": "button press"}]
     assert {
@@ -119,6 +122,19 @@ def test_selected_channel_and_user_marker_are_bounded_metadata() -> None:
         "property_id",
         "dropped",
     }.issubset(exported["events"][0])
+
+
+def test_trace_preserves_multi_producer_basename_mapping() -> None:
+    first = frame(message_type=1, process_id=101, qpc_ticks=1)
+    second = replace(first, process_id=202, text=r"D:\Other\second.exe", qpc_ticks=2)
+    exported = trace_payload([first, second], 1_000_000_000, [])
+
+    assert exported["producer"] == "fixture.exe"
+    assert exported["producers"] == [
+        {"process_id": 101, "name": "fixture.exe"},
+        {"process_id": 202, "name": "second.exe"},
+    ]
+    assert "D:\\Other" not in str(exported)
 
 
 def test_condition_channels_are_observed_without_synthesizing_force() -> None:

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 from __future__ import annotations
 
+import csv
 import time
 from dataclasses import replace
 
@@ -54,6 +55,29 @@ def test_device_and_effect_filters_are_scoped_to_producer(qtbot) -> None:
     assert window.device_box.findData("101:7") == -1
     assert window.effect_box.findData("101:9") == -1
     assert window._visible_events() == [second]
+
+
+def test_csv_export_includes_bounded_producer_identity(qtbot, monkeypatch, tmp_path) -> None:
+    window = MainWindow(start_server=False)
+    qtbot.addWidget(window)
+    hello = replace(
+        frame(sequence=1, process_id=101), message_type=1, text=r"C:\Games\producer.exe"
+    )
+    command = replace(frame(sequence=2, process_id=101), device_id=7, effect_id=9)
+    window.store.add(hello)
+    window.store.add(command)
+    path = tmp_path / "trace.csv"
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QFileDialog.getSaveFileName",
+        lambda *args, **kwargs: (str(path), ""),
+    )
+
+    window._export_csv()
+
+    rows = list(csv.DictReader(path.open(newline="", encoding="utf-8")))
+    assert rows[0]["producer"] == "producer.exe"
+    assert rows[0]["process_id"] == "101"
+    assert "C:\\Games" not in path.read_text(encoding="utf-8")
 
 
 @pytest.mark.performance

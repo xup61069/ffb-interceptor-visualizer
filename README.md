@@ -6,7 +6,7 @@ parameters in a live viewer. It forwards every DirectInput call and HRESULT
 unchanged. A graph labelled **Command Peak/RMS** describes the selected API
 channel; it is not a measurement of motor torque.
 
-Version 0.1.18 supports a C++17 `dinput8.dll` proxy for x86 and x64 and a
+Version 0.1.19 supports a C++17 `dinput8.dll` proxy for x86 and x64 and a
 Python 3.12+ x64 PySide6/pyqtgraph viewer. The proxy is derived from
 [walmis/dcs-force-feedback-fix](https://github.com/walmis/dcs-force-feedback-fix)
 v0.2 (MIT) and keeps its history. New code is GPL-3.0-only.
@@ -65,7 +65,9 @@ no sample rather than synthesized force. `Export CSV`, `Export PNG` and
 `Save .ffbtrace` are explicit
 user actions; the versioned trace contains relative time, stable in-process IDs
 and redacted command fields only (never full paths, serials, account names or
-host names). The raw-details pane shows the last selected command without
+host names). CSV exports additionally include the bounded producer basename and
+process ID so device/effect IDs remain attributable when multiple producers
+are selected. The raw-details pane shows the last selected command without
 inventing condition-force samples.
 
 ## Protocol
@@ -102,7 +104,7 @@ and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Status
 
-v0.1.18 is a prerelease and is marked `UNSIGNED EXPERIMENTAL`. Synthetic
+v0.1.19 is a prerelease and is marked `UNSIGNED EXPERIMENTAL`. Synthetic
 protocol/queue tests are the release gate. Real hardware or commercial-game
 results are not compatibility claims unless accompanied by explicit
 authorization and reproducible evidence.

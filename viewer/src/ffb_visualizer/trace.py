@@ -16,21 +16,30 @@ def trace_payload(
     """Build a serializable v1 trace without paths or host-specific metadata."""
     frequency = qpc_frequency or 1_000_000_000
     origin = events[0].qpc_ticks if events else 0
-    producer = ""
+    producers: dict[int, str] = {}
     for event in events:
         if event.message_type == 1 and event.text:
-            producer = event.text.replace("\\", "/").rsplit("/", 1)[-1][:255]
-            break
+            producers.setdefault(event.process_id, producer_basename(event.text))
+    producer = next(iter(producers.values()), "")
     return {
         "format": "ffbtrace",
         "version": 1,
         "qpc_frequency": frequency,
         "producer": producer,
+        "producers": [
+            {"process_id": process_id, "name": name} for process_id, name in producers.items()
+        ],
         "events": [_event_payload(event, origin, frequency) for event in events],
         "markers": [
             {"relative_seconds": seconds, "label": label[:64]} for seconds, label in markers
         ],
     }
+
+
+def producer_basename(value: str) -> str:
+    """Return a bounded executable basename without retaining a path."""
+
+    return value.replace("\\", "/").rsplit("/", 1)[-1][:255]
 
 
 def _event_payload(event: Frame, origin: int, frequency: int) -> dict[str, object]:
