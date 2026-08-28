@@ -123,6 +123,7 @@ finally {
     }
 }
 uv run cyclonedx-py environment --pyproject pyproject.toml --output-reproducible -o ../release/sbom.cdx.json
+uv run python ../.github/scripts/generate-spdx-sbom.py --pyproject pyproject.toml --output ../release/sbom.spdx.json
 Compress-Archive -Path dist/ffb-viewer -DestinationPath ../release/ffb-viewer-x64.zip -Force
 Pop-Location
 Assert-ZipEntries -Archive 'release/ffb-viewer-x64.zip' -RequiredEntries @(

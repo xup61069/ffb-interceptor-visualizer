@@ -39,6 +39,7 @@ Highlights:
   bounded rolling event buffer advances.
 - Effect GUID queries preserve the underlying COM result and HRESULT; cached
   GUIDs are used only for telemetry metadata.
+- Release assets include both CycloneDX 1.6 and SPDX 2.3 SBOM documents.
 - CI validates proxy x86/x64 and viewer Python 3.12/3.13; clean-clone rebuilds
   and synthetic protocol/queue gates are required before publication.
 
@@ -46,7 +47,7 @@ Assets:
 - `ffb-interceptor-visualizer-{{TAG}}-source.zip`
 - `ffb-proxy-x86.zip`, `ffb-proxy-x64.zip`
 - `ffb-viewer-x64.zip`
-- `SHA256SUMS`, `sbom.cdx.json`
+- `SHA256SUMS`, `sbom.cdx.json` (CycloneDX 1.6), `sbom.spdx.json` (SPDX 2.3)
 
 Release assets carry GitHub build-provenance attestations. Verify SHA-256
 values before use. This is an unsigned experimental prerelease: no installer
