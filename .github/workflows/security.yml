@@ -28,6 +28,7 @@ jobs:
       - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
         with:
           languages: c-cpp, python
+          build-mode: manual
       - name: Build C++ for CodeQL
         shell: pwsh
         run: |
