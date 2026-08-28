@@ -102,7 +102,7 @@ def test_selected_channel_and_user_marker_are_bounded_metadata() -> None:
     assert peak == 0.8
     assert rms == 0.2
     store.mark_latest("button press")
-    assert store.markers == [(1.0, "button press")]
+    assert store.markers == [(1_000_000_000, "button press")]
     hello = replace(store.events[0], message_type=1, text=r"C:\Games\sample.exe")
     exported = trace_payload([hello, *list(store.events)], store.qpc_frequency, store.markers)
     assert exported["format"] == "ffbtrace"
@@ -122,6 +122,18 @@ def test_selected_channel_and_user_marker_are_bounded_metadata() -> None:
         "property_id",
         "dropped",
     }.issubset(exported["events"][0])
+
+
+def test_marker_export_tracks_rolling_window_origin() -> None:
+    store = EventStore(capacity=2)
+    for tick in (0, 1_000_000_000):
+        store.add(replace(frame(message_type=6), qpc_ticks=tick))
+    store.mark_latest("before roll")
+    store.add(replace(frame(message_type=6), qpc_ticks=2_000_000_000))
+
+    exported = trace_payload(list(store.events), store.qpc_frequency, store.markers)
+
+    assert exported["markers"] == [{"relative_seconds": 0.0, "label": "before roll"}]
 
 
 def test_trace_preserves_multi_producer_basename_mapping() -> None:

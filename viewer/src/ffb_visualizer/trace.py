@@ -11,7 +11,7 @@ from .protocol import Frame
 def trace_payload(
     events: Sequence[Frame],
     qpc_frequency: int,
-    markers: Sequence[tuple[float, str]],
+    markers: Sequence[tuple[int, str]],
 ) -> dict[str, object]:
     """Build a serializable v1 trace without paths or host-specific metadata."""
     frequency = qpc_frequency or 1_000_000_000
@@ -31,7 +31,11 @@ def trace_payload(
         ],
         "events": [_event_payload(event, origin, frequency) for event in events],
         "markers": [
-            {"relative_seconds": seconds, "label": label[:64]} for seconds, label in markers
+            {
+                "relative_seconds": (qpc_ticks - origin) / frequency,
+                "label": label[:64],
+            }
+            for qpc_ticks, label in markers
         ],
     }
 
