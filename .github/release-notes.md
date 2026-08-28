@@ -19,6 +19,9 @@ Highlights:
   and bilingual README files needed for manual installation and redistribution.
 - Command-channel selection, condition-axis inspection, time-weighted Command
   Peak/RMS, trace/CSV/PNG export, and redacted custom-effect handling.
+- Sender serialization failures stay fail-open and unconfirmed pipe frames are
+  counted in DropNotice; malformed stream headers now close the client rather
+  than resynchronizing across arbitrary bytes.
 - CI validates proxy x86/x64 and viewer Python 3.12/3.13; clean-clone rebuilds
   and synthetic protocol/queue gates are required before publication.
 

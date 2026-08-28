@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from ffb_visualizer.protocol import ProtocolError, decode_frame, iter_frames
+from ffb_visualizer.protocol import MAX_FRAME_SIZE, ProtocolError, decode_frame, iter_frames
 
 
 def fixture_frame() -> bytes:
@@ -70,3 +70,24 @@ def test_shared_golden_fixture() -> None:
 def test_rejects_bad_frames(mutator) -> None:
     with pytest.raises(ProtocolError):
         decode_frame(mutator(fixture_frame()))
+
+
+@pytest.mark.parametrize(
+    "mutator",
+    [
+        lambda b: b.replace(b"FFB1", b"NOPE", 1),
+        lambda b: b[:8] + struct.pack("<I", 31) + b[12:],
+        lambda b: b[:8] + struct.pack("<I", MAX_FRAME_SIZE + 1) + b[12:],
+        lambda b: b[:4] + struct.pack("<H", 2) + b[6:],
+    ],
+)
+def test_stream_parser_fails_closed_on_invalid_headers(mutator) -> None:
+    buffer = bytearray(mutator(fixture_frame()))
+    with pytest.raises(ProtocolError):
+        list(iter_frames(buffer))
+
+
+def test_stream_parser_does_not_resynchronize_after_garbage() -> None:
+    buffer = bytearray(b"garbage" + fixture_frame())
+    with pytest.raises(ProtocolError):
+        list(iter_frames(buffer))

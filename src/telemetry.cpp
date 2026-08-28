@@ -21,7 +21,14 @@ Telemetry::Node* node_from_entry(PSLIST_ENTRY entry) {
 
 std::size_t utf8_basename(char* out, std::size_t capacity) {
     wchar_t path[MAX_PATH]{};
-    const DWORD length = GetModuleFileNameW(nullptr, path, MAX_PATH);
+    DWORD length = GetModuleFileNameW(nullptr, path, MAX_PATH);
+    // On older Windows versions a result equal to the buffer size means the
+    // path may not be NUL-terminated.  Keep the conversion bounded even when
+    // the executable path is longer than MAX_PATH.
+    if (length >= MAX_PATH) {
+        path[MAX_PATH - 1] = L'\0';
+        length = MAX_PATH - 1;
+    }
     const wchar_t* base = path;
     for (DWORD i = 0; i < length; ++i) {
         if (path[i] == L'\\' || path[i] == L'/') base = path + i + 1;
@@ -174,7 +181,14 @@ Event Telemetry::hello_event() const noexcept {
 }
 
 bool Telemetry::send_frame(HANDLE pipe, const Event& event) noexcept {
-    const std::vector<std::uint8_t> frame = serialize_event(event);
+    std::vector<std::uint8_t> frame;
+    try {
+        frame = serialize_event(event);
+    } catch (...) {
+        // Telemetry is strictly best-effort.  A sender-side allocation or
+        // serialization failure must never escape into the host process.
+        return false;
+    }
     if (frame.size() > kMaxFrameSize) return false;
     std::size_t offset = 0;
     while (offset < frame.size()) {
@@ -242,6 +256,17 @@ void Telemetry::run() noexcept {
             for (std::size_t i = 0; i < count && connected; ++i) {
                 connected = send_frame(pipe, batch[i]->event);
                 InterlockedPushEntrySList(&m_free, &batch[i]->entry);
+                if (!connected) {
+                    // The failed frame and every later frame in this batch
+                    // were not confirmed on the pipe.  Return their nodes
+                    // and account for the loss so the next connection can
+                    // publish an accurate DropNotice.
+                    InterlockedIncrement64(&m_dropped);
+                    for (std::size_t unsent = i + 1; unsent < count; ++unsent) {
+                        InterlockedIncrement64(&m_dropped);
+                        InterlockedPushEntrySList(&m_free, &batch[unsent]->entry);
+                    }
+                }
             }
 
             const auto drops = static_cast<std::uint64_t>(InterlockedCompareExchange64(&m_dropped, 0, 0));

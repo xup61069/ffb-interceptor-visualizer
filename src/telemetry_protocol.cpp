@@ -107,7 +107,17 @@ void fill_effect_parameters(Event& event, const DIEFFECT* effect) noexcept {
             event.envelope_fade_time = effect->lpEnvelope->dwFadeTime;
         }
         event.type_specific_size = effect->cbTypeSpecificParams;
-        if (!effect->lpvTypeSpecificParams || event.type_specific_size == 0) return;
+        if (!effect->lpvTypeSpecificParams || event.type_specific_size == 0) {
+            // Custom/unknown effects never expose their opaque bytes.  Keep
+            // the redaction bit set even when the game supplied a null or
+            // zero-length pointer so consumers cannot mistake the absence of
+            // a payload for an inspected custom effect.
+            if (event.effect_kind == EffectKind::Custom ||
+                event.effect_kind == EffectKind::Unknown) {
+                event.custom_redacted = true;
+            }
+            return;
+        }
         switch (event.effect_kind) {
             case EffectKind::Constant:
                 if (event.type_specific_size >= sizeof(DICONSTANTFORCE))

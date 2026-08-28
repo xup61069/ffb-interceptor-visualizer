@@ -73,6 +73,14 @@ int main() {
     frame[8] ^= 0x01;
     assert(!ffb::valid_frame(frame.data(), frame.size()));
 
+    ffb::Event opaque{};
+    opaque.effect_kind = ffb::EffectKind::Custom;
+    DIEFFECT empty_effect{};
+    empty_effect.dwSize = sizeof(empty_effect);
+    ffb::fill_effect_parameters(opaque, &empty_effect);
+    assert(opaque.type_specific_size == 0);
+    assert(opaque.custom_redacted);
+
     ffb::Event golden{};
     golden.type = ffb::MessageType::EffectParametersChanged;
     golden.effect_kind = ffb::EffectKind::Spring;

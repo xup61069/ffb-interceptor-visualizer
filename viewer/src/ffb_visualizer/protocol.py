@@ -220,16 +220,20 @@ def decode_frame(data: bytes | bytearray | memoryview) -> Frame:
 
 
 def iter_frames(buffer: bytearray) -> Iterable[Frame]:
-    """Consume complete frames from a byte buffer, retaining a partial tail."""
+    """Consume complete frames, retaining only a valid partial tail.
+
+    A pipe stream is expected to begin with a frame magic and length.  Any
+    invalid header is a protocol violation rather than recoverable noise, so
+    callers can fail closed and disconnect the producer instead of silently
+    resynchronizing across attacker-controlled bytes.
+    """
 
     while len(buffer) >= HEADER_SIZE:
         if buffer[:4] != MAGIC:
-            del buffer[0]
-            continue
+            raise ProtocolError("bad magic")
         frame_size = _u32(buffer, 8)
         if frame_size < HEADER_SIZE or frame_size > MAX_FRAME_SIZE:
-            del buffer[:4]
-            continue
+            raise ProtocolError("invalid frame size")
         if len(buffer) < frame_size:
             return
         chunk = bytes(buffer[:frame_size])

@@ -24,4 +24,5 @@ The `Hello` payload carries the process ID, bitness in header flags, QPC
 frequency, build version, per-process session ID and executable basename (never
 the full path). Other messages leave those identity strings empty.
 The current implementation decodes partial streams and rejects malformed,
-oversize, truncated and version-mismatched frames.
+oversize, truncated and version-mismatched frames. A malformed header is a
+connection error; the parser does not resynchronize across arbitrary bytes.
