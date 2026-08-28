@@ -2,8 +2,9 @@
 $ErrorActionPreference = 'Stop'
 
 <#
-  Check the SPDX marker on every tracked implementation/build file that is
-  distributed in source or binary archives.  The wrapper files derived from
+  Check the SPDX marker on every tracked implementation/build file with a
+  comment-compatible format that is distributed in source or binary archives.
+  The wrapper files derived from
   walmis/dcs-force-feedback-fix remain MIT; all project-authored files are GPL.
 #>
 
