@@ -43,6 +43,9 @@ jobs:
           $gitleaks = Join-Path (go env GOPATH) 'bin/gitleaks.exe'
           & $gitleaks git --redact --log-opts="--all"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Audit SPDX headers before publishing
+        shell: pwsh
+        run: .github/scripts/check-license-headers.ps1
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'

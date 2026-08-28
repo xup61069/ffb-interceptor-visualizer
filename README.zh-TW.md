@@ -5,7 +5,7 @@
 轉發。圖表的 **Command Peak/RMS** 只代表選定 API 通道的命令值，不是方向盤
 馬達扭力量測。
 
-v0.1.14 提供 C++17 的 x86/x64 `dinput8.dll` proxy，以及 Python 3.12+、
+v0.1.15 提供 C++17 的 x86/x64 `dinput8.dll` proxy，以及 Python 3.12+、
 PySide6/pyqtgraph 的 x64 viewer。proxy 源自
 [walmis/dcs-force-feedback-fix](https://github.com/walmis/dcs-force-feedback-fix)
 v0.2（MIT）並保留完整歷史；新增程式採 GPL-3.0-only。

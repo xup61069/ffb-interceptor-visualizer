@@ -32,9 +32,9 @@ cannot be published.
 The packaging script also inspects each ZIP and fails if the binary, GPL/MIT
 notices, third-party notice, or bilingual README entries are missing.
 Before any build or upload, the release job runs the pinned gitleaks scanner
-against the complete checked-out Git history (`--all`). A finding therefore
-blocks publication even if the branch `Security analysis` workflow is still
-running in parallel.
+against the complete checked-out Git history (`--all`) and the SPDX header
+audit. A finding therefore blocks publication even if the branch `Security
+analysis` workflow is still running in parallel.
 The security workflow additionally runs
 `.github/scripts/check-license-headers.ps1`, which checks every tracked
 implementation/build file for an SPDX marker and verifies that the inherited
