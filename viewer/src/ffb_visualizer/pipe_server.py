@@ -229,7 +229,7 @@ class PipeServer:
                     for frame in iter_frames(buf):
                         if first_frame and frame.message_type != 1:
                             raise ProtocolError("first frame must be Hello")
-                        if first_frame and client_pid and frame.process_id != client_pid:
+                        if first_frame and (client_pid is None or frame.process_id != client_pid):
                             raise ProtocolError("Hello PID does not match pipe client")
                         first_frame = False
                         try:
@@ -294,7 +294,7 @@ def _security_attributes():
 
 
 def _client_pid(handle: int) -> int | None:
-    """Return the kernel-reported client PID, when supported by this Windows build."""
+    """Return the kernel-reported client PID, or ``None`` on API failure."""
     try:
         pid = ctypes.c_ulong(0)
         function = ctypes.windll.kernel32.GetNamedPipeClientProcessId

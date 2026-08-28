@@ -26,6 +26,8 @@ Highlights:
   and SPDX header audit before any build provenance or asset upload.
 - Disconnecting with a truncated frame tail is rejected and counted as a pipe
   protocol error instead of being silently discarded.
+- Client PID lookup is now fail-closed: if the kernel API is unavailable or
+  fails, the Hello frame is rejected rather than accepted without binding.
 - CI validates proxy x86/x64 and viewer Python 3.12/3.13; clean-clone rebuilds
   and synthetic protocol/queue gates are required before publication.
 

@@ -121,6 +121,25 @@ def test_windows_pipe_rejects_hello_pid_mismatch() -> None:
 
 
 @pytest.mark.skipif(os.name != "nt", reason="uses the production Windows named pipe")
+def test_windows_pipe_rejects_unavailable_client_pid(monkeypatch) -> None:
+    received: list[object] = []
+    monkeypatch.setattr(pipe_server, "_client_pid", lambda _handle: None)
+    server = pipe_server.PipeServer(received.append)
+    server.start()
+    try:
+        with _connect_writer() as writer:
+            _write(writer, frame_bytes(message_type=1, sequence=1))
+        deadline = time.monotonic() + 5.0
+        while server.errors == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert server.errors >= 1
+        assert received == []
+    finally:
+        server.stop()
+        assert not server._thread or not server._thread.is_alive()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="uses the production Windows named pipe")
 def test_windows_pipe_rejects_truncated_frame_at_disconnect() -> None:
     received: list[object] = []
     server = pipe_server.PipeServer(received.append)
