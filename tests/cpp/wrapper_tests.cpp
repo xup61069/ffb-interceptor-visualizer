@@ -12,6 +12,8 @@ class FakeEffect final : public IDirectInputEffect {
 public:
     HRESULT start_result = E_ACCESSDENIED;
     HRESULT set_result = E_INVALIDARG;
+    HRESULT guid_result = S_FALSE;
+    GUID reported_guid = GUID_RampForce;
     DWORD last_iterations = 0;
     DWORD last_flags = 0;
     LPCDIEFFECT last_parameters = nullptr;
@@ -32,8 +34,8 @@ public:
     HRESULT STDMETHODCALLTYPE Initialize(HINSTANCE, DWORD, REFGUID) override { return S_OK; }
     HRESULT STDMETHODCALLTYPE GetEffectGuid(LPGUID guid) override {
         if (!guid) return E_POINTER;
-        *guid = GUID_ConstantForce;
-        return S_OK;
+        *guid = reported_guid;
+        return guid_result;
     }
     HRESULT STDMETHODCALLTYPE GetParameters(LPDIEFFECT, DWORD) override { return S_OK; }
     HRESULT STDMETHODCALLTYPE SetParameters(LPCDIEFFECT parameters, DWORD flags) override {
@@ -66,6 +68,11 @@ int main() {
     assert(wrapper->QueryInterface(IID_IUnknown, &unknown) == S_OK);
     assert(unknown == static_cast<IDirectInputEffect*>(wrapper));
     assert(static_cast<IUnknown*>(unknown)->Release() == 1);
+
+    GUID reported{};
+    assert(wrapper->GetEffectGuid(&reported) == S_FALSE);
+    assert(IsEqualGUID(reported, GUID_RampForce));
+    assert(wrapper->GetEffectGuid(nullptr) == E_POINTER);
 
     DIEFFECT parameters{};
     DICONSTANTFORCE constant{1234};

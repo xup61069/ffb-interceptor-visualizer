@@ -49,9 +49,10 @@ HRESULT STDMETHODCALLTYPE WrapperEffect::Initialize(HINSTANCE instance, DWORD ve
 }
 
 HRESULT STDMETHODCALLTYPE WrapperEffect::GetEffectGuid(LPGUID guid) {
-    if (!guid) return E_POINTER;
-    *guid = m_guid;
-    return DI_OK;
+    // Preserve the real COM method's output and HRESULT.  The cached GUID is
+    // telemetry metadata only; substituting it here would change DirectInput
+    // behaviour for devices that reject or normalize this query.
+    return m_real ? m_real->GetEffectGuid(guid) : DIERR_UNSUPPORTED;
 }
 
 HRESULT STDMETHODCALLTYPE WrapperEffect::GetParameters(LPDIEFFECT effect, DWORD flags) {
