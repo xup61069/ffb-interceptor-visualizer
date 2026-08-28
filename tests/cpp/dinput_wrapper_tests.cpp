@@ -109,5 +109,18 @@ int main() {
     assert(static_cast<IDirectInput8A*>(unknown)->Release() == 1);
     assert(wrapped_a->Release() == 0);
     assert(fake->refs() == 0);
+
+    // A wrapper that was never published must not consume the caller's real
+    // interface reference while its shared A/W state is being torn down.
+    auto* fallback_fake = new FakeDirectInput();
+    auto* fallback_wrapper = new WrapperDirectInput8A(
+        static_cast<IDirectInput8A*>(fallback_fake));
+    assert(fallback_wrapper && fallback_wrapper->valid());
+    fallback_wrapper->discard_unpublished();
+    assert(fallback_fake->refs() == 1);
+    assert(fallback_fake->Release() == 0);
+    delete fallback_fake;
+
+    delete fake;
     return 0;
 }

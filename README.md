@@ -6,7 +6,7 @@ parameters in a live viewer. It forwards every DirectInput call and HRESULT
 unchanged. A graph labelled **Command Peak/RMS** describes the selected API
 channel; it is not a measurement of motor torque.
 
-Version 0.1.17 supports a C++17 `dinput8.dll` proxy for x86 and x64 and a
+Version 0.1.18 supports a C++17 `dinput8.dll` proxy for x86 and x64 and a
 Python 3.12+ x64 PySide6/pyqtgraph viewer. The proxy is derived from
 [walmis/dcs-force-feedback-fix](https://github.com/walmis/dcs-force-feedback-fix)
 v0.2 (MIT) and keeps its history. New code is GPL-3.0-only.
@@ -102,7 +102,7 @@ and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Status
 
-v0.1.17 is a prerelease and is marked `UNSIGNED EXPERIMENTAL`. Synthetic
+v0.1.18 is a prerelease and is marked `UNSIGNED EXPERIMENTAL`. Synthetic
 protocol/queue tests are the release gate. Real hardware or commercial-game
 results are not compatibility claims unless accompanied by explicit
 authorization and reproducible evidence.

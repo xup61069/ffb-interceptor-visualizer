@@ -7,7 +7,9 @@ chain is `IDirectInput8[A/W] → IDirectInputDevice8[A/W] →
 IDirectInputEffect`. A/W views created by the proxy share a control block, so their
 `QueryInterface(IUnknown)`, AddRef and Release calls retain one canonical
 identity and reference count; aggregation and unknown interfaces pass through
-unchanged.
+unchanged. If an alternate A/W view cannot be allocated, the unpublished
+wrapper is discarded without consuming the caller-owned real COM reference,
+so fail-open fallback still returns the original interface safely.
 
 FFB calls copy validated scalar DirectInput structures into a preallocated
 bounded queue. A worker thread owns pipe I/O and emits protocol frames. Queue

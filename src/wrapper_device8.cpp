@@ -50,6 +50,12 @@ struct WrapperDevice8State {
     WrapperDevice8A* wrapper_a = nullptr;
     WrapperDevice8W* wrapper_w = nullptr;
 
+    bool valid() const noexcept {
+        // A successful QI for the alternate A/W interface creates an
+        // additional real reference that must have a matching wrapper.
+        return (!real_a || wrapper_a) && (!real_w || wrapper_w);
+    }
+
     ~WrapperDevice8State() {
         delete wrapper_a;
         delete wrapper_w;
@@ -107,6 +113,29 @@ WrapperDevice8<U>::WrapperDevice8(WrapperDevice8State* state, Base* real,
 
 template<bool U>
 WrapperDevice8<U>::~WrapperDevice8() = default;
+
+template<bool U>
+bool WrapperDevice8<U>::valid() const noexcept {
+    return m_state != nullptr && m_state->valid();
+}
+
+template<bool U>
+void WrapperDevice8<U>::discard_unpublished() noexcept {
+    if (!m_state) {
+        delete this;
+        return;
+    }
+    // Preserve the caller-owned original interface reference.  Any alias
+    // reference acquired by QueryInterface remains state-owned and is
+    // released when the shared control block is destroyed.
+    if constexpr (U) {
+        m_state->real_w = nullptr;
+    } else {
+        m_state->real_a = nullptr;
+    }
+    m_real = nullptr;
+    Release();
+}
 
 template<bool U>
 HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::QueryInterface(REFIID riid, void** out) {

@@ -142,13 +142,21 @@ def test_windows_pipe_rejects_unavailable_client_pid(monkeypatch) -> None:
 @pytest.mark.skipif(os.name != "nt", reason="uses the production Windows named pipe")
 def test_windows_pipe_rejects_truncated_frame_at_disconnect() -> None:
     received: list[object] = []
-    server = pipe_server.PipeServer(received.append)
+    hello_delivered = threading.Event()
+
+    def on_frame(value: object) -> None:
+        received.append(value)
+        if value.sequence == 1:  # ty: ignore[unresolved-attribute]
+            hello_delivered.set()
+
+    server = pipe_server.PipeServer(on_frame)
     server.start()
     try:
         hello = frame_bytes(message_type=1, sequence=1)
         truncated = frame_bytes(sequence=2)[:17]
         with _connect_writer() as writer:
             _write(writer, hello)
+            assert hello_delivered.wait(5.0)
             _write(writer, truncated)
         deadline = time.monotonic() + 5.0
         while server.errors == 0 and time.monotonic() < deadline:

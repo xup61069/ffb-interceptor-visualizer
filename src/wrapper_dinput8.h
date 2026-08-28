@@ -22,7 +22,10 @@ public:
 
     explicit WrapperDirectInput8(Base* real);
     ~WrapperDirectInput8();
-    bool valid() const noexcept { return m_state != nullptr; }
+    bool valid() const noexcept;
+    // Dispose a wrapper that was never published while preserving the
+    // caller-owned real COM reference for fail-open fallback.
+    void discard_unpublished() noexcept;
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void**) override;
     ULONG STDMETHODCALLTYPE AddRef() override;
     ULONG STDMETHODCALLTYPE Release() override;

@@ -25,7 +25,10 @@ public:
 
     WrapperDevice8(Base* real, std::uint32_t device_id);
     ~WrapperDevice8();
-    bool valid() const noexcept { return m_state != nullptr; }
+    bool valid() const noexcept;
+    // Dispose a wrapper that was never published while preserving the
+    // caller-owned real COM reference for fail-open fallback.
+    void discard_unpublished() noexcept;
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void**) override;
     ULONG STDMETHODCALLTYPE AddRef() override;

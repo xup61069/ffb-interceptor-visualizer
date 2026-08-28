@@ -75,6 +75,14 @@ struct WrapperDirectInput8State {
     WrapperDirectInput8A* wrapper_a = nullptr;
     WrapperDirectInput8W* wrapper_w = nullptr;
 
+    bool valid() const noexcept {
+        // A successful QI for the alternate A/W interface creates an
+        // additional real reference that must have a matching wrapper.  If
+        // that allocation fails, publishing this object would violate the
+        // COM contract and break fail-open forwarding.
+        return (!real_a || wrapper_a) && (!real_w || wrapper_w);
+    }
+
     ~WrapperDirectInput8State() {
         delete wrapper_a;
         delete wrapper_w;
@@ -131,6 +139,29 @@ WrapperDirectInput8<U>::WrapperDirectInput8(WrapperDirectInput8State* state,
 
 template<bool U>
 WrapperDirectInput8<U>::~WrapperDirectInput8() = default;
+
+template<bool U>
+bool WrapperDirectInput8<U>::valid() const noexcept {
+    return m_state != nullptr && m_state->valid();
+}
+
+template<bool U>
+void WrapperDirectInput8<U>::discard_unpublished() noexcept {
+    if (!m_state) {
+        delete this;
+        return;
+    }
+    // The original interface reference belongs to the caller's output slot.
+    // Detach only that field; alias references acquired by QueryInterface
+    // remain owned by the state and are released by its destructor.
+    if constexpr (U) {
+        m_state->real_w = nullptr;
+    } else {
+        m_state->real_a = nullptr;
+    }
+    m_real = nullptr;
+    Release();
+}
 
 template<bool U>
 HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::QueryInterface(REFIID riid,
@@ -205,7 +236,7 @@ HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::CreateDevice(
     // Preserve fail-open semantics by discarding it and returning the exact
     // real interface the system DLL supplied.
     if (!wrapped || !wrapped->valid()) {
-        delete wrapped;
+        if (wrapped) wrapped->discard_unpublished();
         *out_device = real;
         return hr;
     }
