@@ -214,6 +214,7 @@ class PipeServer:
         client_pid = _client_pid(handle)
         first_frame = True
         buf = bytearray()
+        protocol_failed = False
         try:
             while not self._stop.is_set():
                 # Small bounded reads prevent the tail of a high-rate batch
@@ -238,6 +239,7 @@ class PipeServer:
                             return
                 except ProtocolError:
                     self.errors += 1
+                    protocol_failed = True
                     break
         except pywintypes.error as exc:
             # ERROR_BROKEN_PIPE is the ordinary result when a proxy process
@@ -249,6 +251,11 @@ class PipeServer:
             self.errors += 1
         finally:
             if first_frame and not self._stop.is_set():
+                self.errors += 1
+            elif buf and not protocol_failed and not self._stop.is_set():
+                # A producer that disconnects with a partial frame has
+                # violated the framing contract.  Do not silently discard a
+                # truncated payload after a valid Hello/event sequence.
                 self.errors += 1
             try:
                 win32file.CloseHandle(handle)  # ty: ignore[unresolved-attribute]

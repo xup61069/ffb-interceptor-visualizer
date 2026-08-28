@@ -24,6 +24,8 @@ Highlights:
   than resynchronizing across arbitrary bytes.
 - Release packaging now has its own pinned full-history gitleaks hard gate
   and SPDX header audit before any build provenance or asset upload.
+- Disconnecting with a truncated frame tail is rejected and counted as a pipe
+  protocol error instead of being silently discarded.
 - CI validates proxy x86/x64 and viewer Python 3.12/3.13; clean-clone rebuilds
   and synthetic protocol/queue gates are required before publication.
 
