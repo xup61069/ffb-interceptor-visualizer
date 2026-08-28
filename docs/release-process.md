@@ -45,3 +45,9 @@ dependency jobs run alongside a full-history gitleaks scan and pinned
 actionlint/zizmor workflow audits. The scanner versions are pinned in
 `.github/workflows/security.yml` so a future tool update is an explicit review
 change rather than an implicit floating dependency.
+
+The public `master` branch is protected by the active `master-protection`
+ruleset. Changes must arrive through a pull request, cannot delete or
+force-update the branch, and must pass the seven CI/Security job checks
+(`proxy-x64`, `proxy-x86`, `viewer-py3.12`, `viewer-py3.13`, `codeql`,
+`dependency-audit` and `history-and-workflow-audit`).

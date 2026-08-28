@@ -5,6 +5,10 @@ viewer usability. Please open an issue before large changes and include a
 minimal synthetic reproduction. Do not submit proprietary game captures or
 hardware serials.
 
+The default `master` branch is protected. Submit a pull request; direct pushes
+and force-pushes are disabled, and the proxy/viewer CI plus security checks must
+pass before merging.
+
 Use CMake/Ninja for both proxy architectures and `uv sync --extra dev` for the
 viewer. Before opening a pull request run:
 
