@@ -22,6 +22,8 @@ Highlights:
 - Sender serialization failures stay fail-open and unconfirmed pipe frames are
   counted in DropNotice; malformed stream headers now close the client rather
   than resynchronizing across arbitrary bytes.
+- Release packaging now has its own pinned full-history gitleaks hard gate
+  before any build provenance or asset upload.
 - CI validates proxy x86/x64 and viewer Python 3.12/3.13; clean-clone rebuilds
   and synthetic protocol/queue gates are required before publication.
 

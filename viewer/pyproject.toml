@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 [project]
 name = "ffb-interceptor-viewer"
-version = "0.1.13"
+version = "0.1.14"
 description = "DirectInput8 force-feedback command and effect visualizer"
 readme = "README.md"
 requires-python = ">=3.12"

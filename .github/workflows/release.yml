@@ -36,6 +36,13 @@ jobs:
       - name: Verify release tag and versions
         shell: pwsh
         run: .github/scripts/verify-release-ref.ps1
+      - name: Scan complete history before publishing
+        shell: pwsh
+        run: |
+          go install github.com/zricethezav/gitleaks/v8@v8.30.1
+          $gitleaks = Join-Path (go env GOPATH) 'bin/gitleaks.exe'
+          & $gitleaks git --redact --log-opts="--all"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: '3.13'

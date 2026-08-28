@@ -367,7 +367,7 @@ wheels = [
 
 [[package]]
 name = "ffb-interceptor-viewer"
-version = "0.1.13"
+version = "0.1.14"
 source = { editable = "." }
 dependencies = [
     { name = "numpy" },
