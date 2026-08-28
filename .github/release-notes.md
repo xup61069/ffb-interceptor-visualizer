@@ -6,6 +6,8 @@ It does not measure wheelbase/motor torque, synthesize force, bypass anti-cheat,
 or support iRacing.
 
 Highlights:
+- Runtime viewer version metadata is now checked against the CMake and package
+  versions before release packaging.
 - x86 and x64 `dinput8.dll` proxy builds with fail-open forwarding and a
   bounded telemetry queue.
 - x64 PyInstaller one-directory viewer plus the Python 3.12+ source viewer.

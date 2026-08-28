@@ -2,8 +2,8 @@
 
 Every public release is an existing stable SemVer tag (`vX.Y.Z`) on `master`.
 The release workflow checks out that exact tag, verifies that `HEAD` resolves
-to the same commit, and requires the CMake project version and viewer package
-version to match the tag before it builds anything.
+to the same commit, and requires the CMake project version, viewer package
+version and runtime `__version__` to match the tag before it builds anything.
 
 The workflow produces x86/x64 proxy ZIP files, an x64 viewer ZIP, source ZIP,
 CycloneDX SBOM and `SHA256SUMS`. Each binary archive carries the GPL license,
