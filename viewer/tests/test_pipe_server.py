@@ -120,6 +120,25 @@ def test_windows_pipe_rejects_hello_pid_mismatch() -> None:
         assert not server._thread or not server._thread.is_alive()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="uses the production Windows named pipe")
+def test_windows_pipe_stop_closes_connected_client_readers() -> None:
+    server = pipe_server.PipeServer(lambda _frame: None)
+    server.start()
+    try:
+        with _connect_writer():
+            deadline = time.monotonic() + 5.0
+            while not server._client_handles and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert server._client_handles
+            server.stop()
+            assert not server._clients
+            assert not server._client_handles
+            assert server.errors == 0
+    finally:
+        server.stop()
+        assert not server._thread or not server._thread.is_alive()
+
+
 @pytest.mark.performance
 @pytest.mark.skipif(os.name != "nt", reason="uses the production Windows named pipe")
 def test_windows_pipe_ingestion_p99_under_five_milliseconds_at_1000_events_per_second() -> None:

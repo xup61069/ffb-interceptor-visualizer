@@ -24,6 +24,7 @@ class PipeServer:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._clients: set[threading.Thread] = set()
+        self._client_handles: set[int] = set()
         self._clients_lock = threading.Lock()
         self._listener_lock = threading.Lock()
         self._listener: object | None = None
@@ -38,6 +39,7 @@ class PipeServer:
 
     def stop(self) -> None:
         self._stop.set()
+        self._close_client_handles()
         if self._thread:
             # A stop can race the small gap before _run registers a listener.
             # Retrying the local wake keeps shutdown deterministic without
@@ -47,6 +49,47 @@ class PipeServer:
                 self._thread.join(timeout=0.25)
                 if not self._thread.is_alive():
                     break
+        with self._clients_lock:
+            clients = tuple(self._clients)
+        for client in clients:
+            client.join(timeout=0.5)
+
+    def _close_client_handles(self) -> None:
+        """Close synchronous client reads so stop() can join every reader."""
+        if os.name != "nt":
+            return
+        try:
+            import pywintypes
+            import win32file  # ty: ignore[unresolved-import]
+            import win32pipe  # ty: ignore[unresolved-import]
+        except ImportError:
+            return
+        with self._clients_lock:
+            handles = tuple(self._client_handles)
+        for handle in handles:
+            try:
+                cancel_io = ctypes.windll.kernel32.CancelIoEx
+                cancel_io.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+                cancel_io.restype = ctypes.c_bool
+                cancel_io(ctypes.c_void_p(int(handle)), None)
+            except (AttributeError, OSError, TypeError, ValueError):
+                # Older/non-standard Windows environments may not expose the
+                # cancellation API; DisconnectNamedPipe below remains useful.
+                pass
+            try:
+                # Closing a handle from a different thread does not reliably
+                # cancel a synchronous ReadFile on Windows.  CancelIoEx asks
+                # the kernel to complete that read, while disconnecting the
+                # server end makes the client observe a broken pipe.
+                win32pipe.DisconnectNamedPipe(handle)
+            except (OSError, RuntimeError, pywintypes.error):
+                pass
+            try:
+                win32file.CloseHandle(handle)
+            except (OSError, RuntimeError, pywintypes.error):
+                # The reader may have observed a broken pipe and closed it
+                # concurrently; either outcome unblocks the synchronous read.
+                continue
 
     def _set_listener(self, handle: object) -> None:
         with self._listener_lock:
@@ -140,7 +183,7 @@ class PipeServer:
                     handle = None
                     continue
                 with self._clients_lock:
-                    if len(self._clients) >= self._MAX_CLIENTS:
+                    if self._stop.is_set() or len(self._clients) >= self._MAX_CLIENTS:
                         win32file.CloseHandle(handle)
                         handle = None
                         self.errors += 1
@@ -153,6 +196,7 @@ class PipeServer:
                 )
                 with self._clients_lock:
                     self._clients.add(client)
+                    self._client_handles.add(handle)
                 client.start()
                 handle = None  # Ownership moved to _read_client.
             except (OSError, RuntimeError, pywintypes.error):
@@ -197,8 +241,9 @@ class PipeServer:
                     break
         except pywintypes.error as exc:
             # ERROR_BROKEN_PIPE is the ordinary result when a proxy process
-            # exits or reconnects after it has sent complete frames.
-            if getattr(exc, "winerror", None) not in (109, 232):
+            # exits or reconnects after it has sent complete frames.  A
+            # deliberate CancelIoEx during stop reports ERROR_OPERATION_ABORTED.
+            if getattr(exc, "winerror", None) not in (109, 232, 995):
                 self.errors += 1
         except (OSError, RuntimeError):
             self.errors += 1
@@ -211,6 +256,7 @@ class PipeServer:
                 pass
             with self._clients_lock:
                 self._clients.discard(threading.current_thread())
+                self._client_handles.discard(handle)
 
 
 def _security_attributes():
