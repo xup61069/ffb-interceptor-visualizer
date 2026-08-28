@@ -6,7 +6,7 @@ to the same commit, and requires the CMake project version, viewer package
 version and runtime `__version__` to match the tag before it builds anything.
 
 The workflow produces x86/x64 proxy ZIP files, an x64 viewer ZIP, source ZIP,
-CycloneDX SBOM and `SHA256SUMS`. Each binary archive carries the GPL license,
+CycloneDX and SPDX SBOMs plus `SHA256SUMS`. Each binary archive carries the GPL license,
 upstream MIT notice, third-party notices, and bilingual README files so manual
 redistribution retains the required licensing and safety guidance. GitHub build
 provenance attests the generated files. Releases remain `UNSIGNED EXPERIMENTAL`; the checksums and attestation
