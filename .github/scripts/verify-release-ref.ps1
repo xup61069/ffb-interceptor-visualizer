@@ -20,6 +20,7 @@ if ($tagCommit -ne $headCommit) {
 $expectedVersion = $tag.Substring(1)
 $cmake = Get-Content -Raw -LiteralPath 'CMakeLists.txt'
 $pyproject = Get-Content -Raw -LiteralPath 'viewer/pyproject.toml'
+$packageInit = Get-Content -Raw -LiteralPath 'viewer/src/ffb_visualizer/__init__.py'
 if ($cmake -notmatch "project\(ffb_interceptor VERSION $([regex]::Escape($expectedVersion)) LANGUAGES CXX\)") {
     throw "CMake project version does not match $tag"
 }
@@ -27,6 +28,11 @@ $viewerVersionPattern = '(?m)^\s*version\s*=\s*"' +
     [regex]::Escape($expectedVersion) + '"\s*\r?$'
 if ($pyproject -notmatch $viewerVersionPattern) {
     throw "Viewer package version does not match $tag"
+}
+$viewerModulePattern = '(?m)^__version__\s*=\s*"' +
+    [regex]::Escape($expectedVersion) + '"\s*$'
+if ($packageInit -notmatch $viewerModulePattern) {
+    throw "Viewer runtime __version__ does not match $tag"
 }
 
 Write-Host "Verified $tag -> $headCommit with matching C++ and viewer versions"
