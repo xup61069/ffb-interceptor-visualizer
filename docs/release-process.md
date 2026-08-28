@@ -48,6 +48,6 @@ change rather than an implicit floating dependency.
 
 The public `master` branch is protected by the active `master-protection`
 ruleset. Changes must arrive through a pull request, cannot delete or
-force-update the branch, and must pass the seven CI/Security job checks
-(`proxy-x64`, `proxy-x86`, `viewer-py3.12`, `viewer-py3.13`, `codeql`,
-`dependency-audit` and `history-and-workflow-audit`).
+force-update the branch, and must pass the eight CI/Security job checks
+(`proxy-x64`, `proxy-x86`, `viewer-py3.12`, `viewer-py3.13`, `codeql-cpp`,
+`codeql-python`, `dependency-audit` and `history-and-workflow-audit`).

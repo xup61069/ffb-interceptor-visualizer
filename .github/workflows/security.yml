@@ -14,8 +14,8 @@ concurrency:
 permissions: {}
 
 jobs:
-  codeql:
-    name: codeql
+  codeql-cpp:
+    name: codeql-cpp
     permissions:
       security-events: write # upload CodeQL results for this repository
       actions: read # allow CodeQL to read workflow metadata
@@ -27,13 +27,31 @@ jobs:
           persist-credentials: false
       - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
         with:
-          languages: c-cpp, python
+          languages: c-cpp
+          build-mode: manual
       - name: Build C++ for CodeQL
         shell: pwsh
         run: |
           $devcmd = 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat'
           cmd.exe /d /c "call `"$devcmd`" -arch=x64 >nul && cmake -S . -B build\codeql -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build\codeql --target dinput8"
           exit $LASTEXITCODE
+      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
+
+  codeql-python:
+    name: codeql-python
+    permissions:
+      security-events: write # upload CodeQL results for this repository
+      actions: read # allow CodeQL to read workflow metadata
+      contents: read # checkout the audited source
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
+        with:
+          languages: python
+          build-mode: none
       - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4
 
   dependency-audit:
