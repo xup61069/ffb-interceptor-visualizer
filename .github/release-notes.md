@@ -35,6 +35,8 @@ Highlights:
   to the original interface.
 - CSV exports now include bounded producer basenames and process IDs, while
   v1 traces retain an additive multi-producer basename map.
+- User marker positions remain aligned with the selected trace origin after the
+  bounded rolling event buffer advances.
 - CI validates proxy x86/x64 and viewer Python 3.12/3.13; clean-clone rebuilds
   and synthetic protocol/queue gates are required before publication.
 
