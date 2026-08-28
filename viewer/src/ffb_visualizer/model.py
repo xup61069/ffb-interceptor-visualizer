@@ -97,7 +97,10 @@ class EventStore:
     dropped: int = field(init=False, default=0)
     started: float = field(init=False, default=0.0)
     qpc_frequency: int = field(init=False, default=1_000_000_000)
-    markers: list[tuple[float, str]] = field(init=False)
+    # Keep marker positions in the same monotonic QPC domain as events.  The
+    # visible rolling window can advance after a marker is created, so storing
+    # a relative offset here would make later exports drift.
+    markers: list[tuple[int, str]] = field(init=False)
 
     def __post_init__(self) -> None:
         self.events: deque[Frame] = deque(maxlen=self.capacity)
@@ -157,12 +160,10 @@ class EventStore:
         return peak, math.sqrt(weighted / total)
 
     def mark_latest(self, label: str = "marker") -> None:
-        """Record a user-created marker using relative, monotonic time only."""
+        """Record a user-created marker at the latest event's QPC tick."""
         if not self.events:
             return
-        origin = self.events[0].qpc_ticks
         latest = self.events[-1]
-        seconds = (latest.qpc_ticks - origin) / (self.qpc_frequency or 1_000_000_000)
         if len(self.markers) >= self.marker_capacity:
             del self.markers[: len(self.markers) - self.marker_capacity + 1]
-        self.markers.append((seconds, label[:64]))
+        self.markers.append((latest.qpc_ticks, label[:64]))
