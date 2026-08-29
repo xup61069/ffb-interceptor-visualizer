@@ -111,6 +111,14 @@ try {
         if ($errors.Count -gt 0) { throw "PowerShell syntax error in packaged $relativeScript : $($errors[0].Message)" }
     }
 
+    $startCommand = [IO.File]::ReadAllText((Join-Path $packageRoot 'Start-FFBInterceptor.cmd'))
+    if ($startCommand -match '(?i)(?:^|\s)-NoPause(?:\s|$)') {
+        throw 'Packaged Start command suppresses the first-run instruction pause.'
+    }
+    if ($startCommand -notmatch '(?im)^exit /b %errorlevel%\s*$') {
+        throw 'Packaged Start command does not preserve the PowerShell exit code.'
+    }
+
     $manifestPath = Join-Path $packageRoot 'SHA256SUMS.txt'
     $expectedManifestEntries = @($required | Where-Object { $_ -cne "$root/SHA256SUMS.txt" } |
         ForEach-Object { $_.Substring($root.Length + 1) })

@@ -14,8 +14,8 @@
 
 雙架構共 12 項 C++ 測試、兩個 owner-built 子程序端到端 smoke，以及隔離的 SimHub
 安裝／竄改拒絕／解除安裝復原生命週期均通過。最終 ZIP 有 20 個 allowlist 檔案、沒有
-`dinput8.dll`，大小為 436,267 bytes，SHA-256 為
-`95E70726A54E7D09992503D2A213375E920B070FA29B0A91DCDC8D24212153F9`。
+`dinput8.dll`，大小為 436,268 bytes，SHA-256 為
+`974A73F5E3BFA171AADC86ABC06997C6001BEBFCF2D088FDFDF083E69C2513EE`。
 這不是反作弊繞過，也不代表商業遊戲或實體方向盤相容性已獲驗證。
 
 ## 2. 範圍與授權
@@ -111,10 +111,12 @@ Administrators／SYSTEM 可寫、Users 唯讀 ACL；schema 恰好允許兩個固
 |---|---|---|---|
 | E-001 | x64/x86 CMake + CTest | 建置所有 producer／tests，分別執行兩個 build 目錄的 CTest | n/a |
 | E-002 | owner-built child smoke | 各架構 launcher 以自己為 `--game`，child 執行 `--help` | n/a |
-| E-003 | launcher ZIP lifecycle | `Build-LauncherPackage.ps1` 與 `Test-LauncherPackage.ps1` | ZIP SHA-256 `95E707…153F9` |
+| E-003 | 初始 launcher ZIP lifecycle | `Build-LauncherPackage.ps1` 與 `Test-LauncherPackage.ps1` | release-candidate artifact |
 | E-004 | source/security review | 檢視 launcher、hook、IAT、portable scripts 與 `git diff --check` | n/a |
+| E-005 | hardened package gate | 目錄碰撞、版本混用、state hash 與雙架構驗證 | release-candidate artifact |
+| E-006 | final first-run UX artifact | 首次提示、完整 lifecycle 與 exact ZIP audit | ZIP SHA-256 `974A73…513EE` |
 
-完整 Evidence 位於 case 的 `evidence/E-001.md` 至 `E-004.md`。
+完整 Evidence 位於 case 的 `evidence/E-001.md` 至 `E-006.md`。
 
 ### 5.2 Findings
 
