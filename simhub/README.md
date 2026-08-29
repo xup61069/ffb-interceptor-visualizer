@@ -21,6 +21,21 @@ compiles the adapter against the installed SDK, validates both Dash Studio
 definitions, and creates `simhub/dist/FFBInterceptor-SimHub-0.2.0.zip`.
 No SimHub-owned DLL is copied into the package.
 
+After building the x64 and x86 `ffb_launcher` and `ffb_hook` targets, create the
+recommended no-game-DLL bundle with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File simhub\tools\Build-LauncherPackage.ps1
+```
+
+This produces `simhub/dist/FFBInterceptor-Launcher-0.2.0.zip`. It contains both
+launcher architectures, the two project-owned plug-in DLLs, dashboards, a
+SHA-256 manifest, and no `dinput8.dll`. Its validation extracts the archive,
+parses the packaged scripts, checks the exact allowlist and manifest, and—when
+running as administrator with SimHub closed—executes a fake-install lifecycle,
+tamper refusal, and original-file restoration. See
+[LAUNCHER.zh-TW.md](LAUNCHER.zh-TW.md).
+
 For core-only CI, build and execute:
 
 ```powershell
@@ -29,6 +44,12 @@ simhub\FFBInterceptor.Core.Tests\bin\Release\net48\FFBInterceptor.Core.Tests.exe
 ```
 
 ## Install
+
+For ordinary offline use, prefer the launcher bundle above: extract it and run
+`Start-FFBInterceptor.cmd`. It installs only the SimHub plug-in on first use and
+does not write the game directory.
+
+For a manual or traditional proxy installation:
 
 Close SimHub, copy `FFBInterceptor.SimHub.dll` and
 `FFBInterceptor.Core.dll` into the SimHub installation directory, then enable
@@ -62,7 +83,7 @@ game from leaving a false clipping latch; later `Start` calls can reuse the
 retained effect parameters.
 
 Start SimHub before the game so the plug-in observes a complete effect
-lifecycle. If the proxy reports dropped frames, stale state is discarded and
+lifecycle. If the telemetry producer reports dropped frames, stale state is discarded and
 `DataReliable` becomes false (`DATA GAP` in the bundled dashboards) for that
 producer session; restart the game to establish a fresh trustworthy session.
 

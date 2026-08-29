@@ -1,4 +1,7 @@
-# 即開即用安裝包
+# 傳統 proxy 即開即用安裝包
+
+> 想完全不在遊戲資料夾放 `dinput8.dll`，請改用新的
+> [不改遊戲 DLL launcher 包](LAUNCHER.zh-TW.md)。本頁只說明仍會安裝 proxy 的舊模式。
 
 此 ZIP 不需要安裝 Visual Studio、.NET SDK 或手動挑選 x86/x64 DLL。解壓縮後，雙擊
 `Install-FFBInterceptor.cmd`，在跳出的視窗選擇遊戲的主程式 `.exe`；安裝器會：

@@ -109,6 +109,29 @@ std::wstring windows_error(const wchar_t* context) {
     return result;
 }
 
+bool current_process_is_elevated(bool* elevated, std::wstring* error) {
+    if (!elevated) return false;
+    *elevated = false;
+
+    HANDLE raw_token = nullptr;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &raw_token)) {
+        if (error) *error = windows_error(L"無法確認啟動器權限");
+        return false;
+    }
+    UniqueHandle token(raw_token);
+
+    TOKEN_ELEVATION elevation{};
+    DWORD returned = 0;
+    if (!GetTokenInformation(token.get(), TokenElevation, &elevation,
+                             sizeof(elevation), &returned) ||
+        returned < sizeof(elevation)) {
+        if (error) *error = windows_error(L"無法讀取啟動器權限");
+        return false;
+    }
+    *elevated = elevation.TokenIsElevated != 0;
+    return true;
+}
+
 std::wstring strip_extended_prefix(const std::wstring& path) {
     if (path.rfind(L"\\\\?\\UNC\\", 0) == 0) {
         return L"\\\\" + path.substr(8);
@@ -292,8 +315,7 @@ void record_debug_module(DebugSession* session, void* module_base,
     session->modules.push_back(DebugModule{file_name(path), path, base});
 }
 
-void observe_debug_event(const DEBUG_EVENT& event, DebugSession* session,
-                         HANDLE protected_thread = nullptr) {
+void observe_debug_event(const DEBUG_EVENT& event, DebugSession* session) {
     if (event.dwDebugEventCode == CREATE_PROCESS_DEBUG_EVENT) {
         const auto& information = event.u.CreateProcessInfo;
         session->image_base =
@@ -301,21 +323,6 @@ void observe_debug_event(const DEBUG_EVENT& event, DebugSession* session,
         record_debug_module(session, information.lpBaseOfImage,
                             information.hFile);
         if (information.hFile) CloseHandle(information.hFile);
-        if (information.hProcess &&
-            information.hProcess != session->process.hProcess) {
-            CloseHandle(information.hProcess);
-        }
-        if (information.hThread &&
-            information.hThread != session->process.hThread &&
-            information.hThread != protected_thread) {
-            CloseHandle(information.hThread);
-        }
-    } else if (event.dwDebugEventCode == CREATE_THREAD_DEBUG_EVENT) {
-        const HANDLE thread = event.u.CreateThread.hThread;
-        if (thread && thread != session->process.hThread &&
-            thread != protected_thread) {
-            CloseHandle(thread);
-        }
     } else if (event.dwDebugEventCode == LOAD_DLL_DEBUG_EVENT) {
         record_debug_module(session, event.u.LoadDll.lpBaseOfDll,
                             event.u.LoadDll.hFile);
@@ -450,7 +457,7 @@ bool run_remote_thread(DebugSession* session, std::uintptr_t start_address,
                                 event.u.Exception.ExceptionRecord.ExceptionCode);
             }
         }
-        observe_debug_event(event, session, thread.get());
+        observe_debug_event(event, session);
 
         const bool process_exited =
             event.dwDebugEventCode == EXIT_PROCESS_DEBUG_EVENT;
@@ -591,9 +598,8 @@ bool restore_entry_breakpoint(const DebugSession& session,
                                   breakpoint.original_byte, error);
 }
 
-bool rewind_thread_to_entry_and_single_step(HANDLE thread,
-                                            std::uintptr_t entry_point,
-                                            std::wstring* error) {
+bool rewind_thread_to_entry(HANDLE thread, std::uintptr_t entry_point,
+                            std::wstring* error) {
     CONTEXT context{};
     context.ContextFlags = CONTEXT_CONTROL;
     if (!GetThreadContext(thread, &context)) {
@@ -605,24 +611,8 @@ bool rewind_thread_to_entry_and_single_step(HANDLE thread,
 #else
     context.Eip = static_cast<DWORD>(entry_point);
 #endif
-    context.EFlags |= 0x100;
     if (!SetThreadContext(thread, &context)) {
         if (error) *error = windows_error(L"無法還原遊戲入口執行位置");
-        return false;
-    }
-    return true;
-}
-
-bool clear_single_step(HANDLE thread, std::wstring* error) {
-    CONTEXT context{};
-    context.ContextFlags = CONTEXT_CONTROL;
-    if (!GetThreadContext(thread, &context)) {
-        if (error) *error = windows_error(L"無法讀取入口單步狀態");
-        return false;
-    }
-    context.EFlags &= ~static_cast<DWORD>(0x100);
-    if (!SetThreadContext(thread, &context)) {
-        if (error) *error = windows_error(L"無法清除入口單步狀態");
         return false;
     }
     return true;
@@ -633,7 +623,6 @@ bool pause_after_loader_initialization(const PROCESS_INFORMATION& process,
                                        std::wstring* error) {
     session->process = process;
     bool initial_breakpoint_seen = false;
-    bool entry_single_step_pending = false;
     std::uintptr_t entry_point = 0;
     EntryBreakpoint entry_breakpoint;
     const ULONGLONG deadline = GetTickCount64() + kStartupTimeoutMs;
@@ -689,27 +678,7 @@ bool pause_after_loader_initialization(const PROCESS_INFORMATION& process,
             event.dwThreadId == process.dwThreadId) {
             if (!restore_entry_breakpoint(*session, entry_point,
                                           entry_breakpoint, error) ||
-                !rewind_thread_to_entry_and_single_step(
-                    process.hThread, entry_point, error)) {
-                ContinueDebugEvent(event.dwProcessId, event.dwThreadId,
-                                   DBG_CONTINUE);
-                return false;
-            }
-            entry_single_step_pending = true;
-            if (!ContinueDebugEvent(event.dwProcessId, event.dwThreadId,
-                                    DBG_CONTINUE)) {
-                if (error) *error = windows_error(L"無法開始遊戲入口單步同步");
-                return false;
-            }
-            continue;
-        }
-
-        if (event.dwDebugEventCode == EXCEPTION_DEBUG_EVENT &&
-            entry_single_step_pending &&
-            event.u.Exception.ExceptionRecord.ExceptionCode ==
-                EXCEPTION_SINGLE_STEP &&
-            event.dwThreadId == process.dwThreadId) {
-            if (!clear_single_step(process.hThread, error)) {
+                !rewind_thread_to_entry(process.hThread, entry_point, error)) {
                 ContinueDebugEvent(event.dwProcessId, event.dwThreadId,
                                    DBG_CONTINUE);
                 return false;
@@ -722,7 +691,7 @@ bool pause_after_loader_initialization(const PROCESS_INFORMATION& process,
             }
             if (!ContinueDebugEvent(event.dwProcessId, event.dwThreadId,
                                     DBG_CONTINUE)) {
-                if (error) *error = windows_error(L"無法完成初始載入事件");
+                if (error) *error = windows_error(L"無法完成遊戲入口同步");
                 return false;
             }
             return true;
@@ -756,6 +725,15 @@ namespace ffb::launcher {
 
 bool launch_offline_game(const LaunchRequest& request, DWORD* process_id,
                          std::wstring* error) {
+    bool elevated = false;
+    if (!current_process_is_elevated(&elevated, error)) return false;
+    if (elevated) {
+        if (error) {
+            *error = L"安全限制：請用一般使用者權限執行離線啟動器。";
+        }
+        return false;
+    }
+
     std::wstring game_path;
     if (!resolve_existing_file(request.game_path, &game_path, error)) {
         return false;

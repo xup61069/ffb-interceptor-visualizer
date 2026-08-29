@@ -5,21 +5,24 @@
 轉發。圖表的 **Command Peak/RMS** 只代表選定 API 通道的命令值，不是方向盤
 馬達扭力量測。
 
-v0.2.0 提供 C++17 的 x86/x64 `dinput8.dll` proxy、Python 3.12+
-PySide6/pyqtgraph viewer，以及 .NET Framework 4.8 的 SimHub 外掛。proxy 源自
+v0.2.0 提供 C++17 的 x86/x64 `dinput8.dll` proxy、**不改遊戲 DLL 的離線
+launcher/hook**、Python 3.12+ PySide6/pyqtgraph viewer，以及 .NET Framework 4.8
+的 SimHub 外掛。proxy 源自
 [walmis/dcs-force-feedback-fix](https://github.com/walmis/dcs-force-feedback-fix)
 v0.2（MIT）並保留完整歷史；新增程式採 GPL-3.0-only。
 
 目前只支援由 `DirectInput8Create` 建立的 DirectInput8 FFB；GameInput、WinRT、
-XInput、私有 SDK、反作弊規避、線上競技、驅動／HID hook、記憶體掃描、網路服務與
+XInput、私有 SDK、反作弊規避、線上競技、驅動／HID hook、任意記憶體掃描、網路服務與
 實際扭力量測均不在支援範圍。iRacing 明列不支援，這是支援政策，並非
 GPL 額外用途限制。
 
-高扭力 wheelbase 可能突然動作：先把 gain 設為最低、離線測試並保持手部遠離。遊戲
-資料夾若已有 `dinput8.dll`，絕對不要覆寫；先備份並在移除時還原原檔。啟動失敗時
-刪除本 proxy 與 viewer 即可回復系統 DLL。
+高扭力 wheelbase 可能突然動作：先把 gain 設為最低、離線測試並保持手部遠離。建議
+優先使用 `FFBInterceptor-Launcher-*.zip`：它不含 `dinput8.dll`，也不會寫入遊戲
+資料夾。執行時仍會把固定 Hook 載入它剛建立的遊戲程序記憶體；不能指定既有 PID、
+其他 DLL 或以管理員權限啟動。白話操作與限制見
+[simhub/LAUNCHER.zh-TW.md](simhub/LAUNCHER.zh-TW.md)。
 
-提供 `FFBInterceptor-ReadyToUse-*.zip` 時，使用者可解壓後雙擊
+傳統 proxy 模式仍可用。提供 `FFBInterceptor-ReadyToUse-*.zip` 時，使用者可解壓後雙擊
 `Install-FFBInterceptor.cmd`，選取遊戲 EXE。安裝器會判斷 x86/x64、備份既有 DLL、
 安裝 SimHub 外掛並開啟 Dashboard 匯入檔；解除安裝以
 `Uninstall-FFBInterceptor.cmd` 執行。流程與限制見
@@ -35,10 +38,10 @@ viewer 提供 producer／device／effect 篩選、1／5／10／30 秒視窗、�
 CSV 匯出另含受界限的 producer basename 與 process ID，讓多個 producer 同時選取時
 仍可辨識 device/effect ID。
 
-proxy 的 A/W COM 介面共用控制區塊，跨介面 `QueryInterface(IUnknown)`、AddRef
+proxy 與 launcher hook 共用相同攔截核心；proxy 的 A/W COM 介面共用控制區塊，跨介面 `QueryInterface(IUnknown)`、AddRef
 與 Release 維持同一個 identity 與 refcount；aggregation 與未知介面則原樣轉發。
 
-SimHub 外掛與 Python viewer 可同時運作。proxy 分別寫入
+SimHub 外掛與 Python viewer 可同時運作。proxy 或 launcher hook 分別寫入
 `\\.\pipe\ffb-interceptor-v1` 與
 `\\.\pipe\ffb-interceptor-simhub-v1`；兩端各有獨立的固定 queue、worker、
 drop counter 與重連路徑。削峰預設在命令達 98% 時進入、低於 95% 時準備解除，
@@ -50,7 +53,7 @@ drop counter 與重連路徑。削峰預設在命令達 98% 時進入、低於 9
 的封包。遊戲失焦而成功 `Unacquire` 或回報 acquisition loss 時也會停止舊效果
 狀態，避免殘留假削峰。
 
-Windows CI 會測試 x86／x64 proxy、Python 3.12／3.13、net48 削峰核心與
+Windows CI 會測試 x86／x64 proxy、launcher/hook、IAT 邊界、Python 3.12／3.13、net48 削峰核心與
 Dashboard schema。合成門檻要求 proxy
 queue hot path 在每秒 1,000+ 事件時 p99 小於 100 微秒、Named Pipe ingestion
 p99 小於 5 毫秒，並確認 Qt 計時器以 60 Hz 更新且介面路徑保有至少 30 FPS

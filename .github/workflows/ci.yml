@@ -24,11 +24,11 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      - name: Build proxy and protocol tests
+      - name: Build proxy, launcher hook, and protocol tests
         shell: pwsh
         run: |
           $devcmd = 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat'
-          cmd.exe /d /c "call `"$devcmd`" -arch=$env:BUILD_ARCH >nul && cmake -S . -B build\$env:BUILD_ARCH -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build\$env:BUILD_ARCH --target dinput8 ffb_protocol_tests ffb_wrapper_tests ffb_dinput_wrapper_tests ffb_performance_tests ffb_telemetry_tests && ctest --test-dir build\$env:BUILD_ARCH --output-on-failure"
+          cmd.exe /d /c "call `"$devcmd`" -arch=$env:BUILD_ARCH >nul && cmake -S . -B build\$env:BUILD_ARCH -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build\$env:BUILD_ARCH --target dinput8 ffb_hook ffb_launcher ffb_protocol_tests ffb_wrapper_tests ffb_dinput_wrapper_tests ffb_performance_tests ffb_telemetry_tests ffb_iat_hook_tests && ctest --test-dir build\$env:BUILD_ARCH --output-on-failure"
           exit $LASTEXITCODE
 
   simhub-core:
@@ -61,7 +61,13 @@ jobs:
             'simhub\portable\Install-FFBInterceptor.ps1',
             'simhub\portable\Uninstall-FFBInterceptor.ps1',
             'simhub\tools\Build-ReadyToUsePackage.ps1',
-            'simhub\tools\Test-ReadyToUsePackage.ps1'
+            'simhub\tools\Test-ReadyToUsePackage.ps1',
+            'simhub\launcher-portable\FFBInterceptor.Common.ps1',
+            'simhub\launcher-portable\Install-SimHubPlugin.ps1',
+            'simhub\launcher-portable\Uninstall-SimHubPlugin.ps1',
+            'simhub\launcher-portable\Start-FFBInterceptor.ps1',
+            'simhub\tools\Build-LauncherPackage.ps1',
+            'simhub\tools\Test-LauncherPackage.ps1'
           )
           foreach ($scriptPath in $scripts) {
             $tokens = $null

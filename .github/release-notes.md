@@ -10,6 +10,9 @@ Highlights:
   versions before release packaging.
 - x86 and x64 `dinput8.dll` proxy builds with fail-open forwarding and a
   bounded telemetry queue.
+- x86 and x64 offline launcher/hook builds provide a no-game-DLL mode: only a
+  newly created child and fixed sibling hook are accepted, with no PID/DLL
+  selection or anti-cheat support.
 - x64 PyInstaller one-directory viewer plus the Python 3.12+ source viewer.
 - Versioned v1 little-endian pipe protocol with current-user DACL,
   `PIPE_REJECT_REMOTE_CLIENTS`, and client PID verification.
@@ -40,7 +43,7 @@ Highlights:
 - Effect GUID queries preserve the underlying COM result and HRESULT; cached
   GUIDs are used only for telemetry metadata.
 - Release assets include both CycloneDX 1.6 and SPDX 2.3 SBOM documents.
-- CI validates proxy x86/x64 and viewer Python 3.12/3.13; clean-clone rebuilds
+- CI validates proxy plus launcher/hook x86/x64 and viewer Python 3.12/3.13; clean-clone rebuilds
   and synthetic protocol/queue gates are required before publication.
 
 Assets:
@@ -50,6 +53,7 @@ Assets:
 - `SHA256SUMS`, `sbom.cdx.json` (CycloneDX 1.6), `sbom.spdx.json` (SPDX 2.3)
 
 Release assets carry GitHub build-provenance attestations. Verify SHA-256
-values before use. This is an unsigned experimental prerelease: no installer
-is provided. Follow the manual install/remove and high-torque wheelbase safety
-guidance in the README; never overwrite an existing `dinput8.dll` proxy.
+values before use. This is an unsigned experimental prerelease. Automated
+release assets do not include the locally SDK-built SimHub launcher bundle;
+follow the install/remove and high-torque wheelbase safety guidance in the
+README, and never overwrite an existing `dinput8.dll` proxy in traditional mode.

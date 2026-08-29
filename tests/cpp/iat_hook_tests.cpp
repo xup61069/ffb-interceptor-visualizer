@@ -114,5 +114,18 @@ int main() {
                reinterpret_cast<void*>(&replacement_create)) == 0);
     assert(unrelated_library.address() ==
            reinterpret_cast<void*>(&original_create));
+
+#if defined(_MSC_VER)
+    // A packed or defensive module may leave its header page unreadable after
+    // loading.  The bounded monitor must skip it instead of crashing the game.
+    auto* inaccessible = static_cast<std::uint8_t*>(VirtualAlloc(
+        nullptr, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_NOACCESS));
+    assert(inaccessible != nullptr);
+    assert(ffb::patch_direct_input8_imports(
+               reinterpret_cast<HMODULE>(inaccessible),
+               reinterpret_cast<void*>(&original_create),
+               reinterpret_cast<void*>(&replacement_create)) == 0);
+    VirtualFree(inaccessible, 0, MEM_RELEASE);
+#endif
     return 0;
 }

@@ -67,3 +67,21 @@ tracks them for safe removal. The public release workflow does not currently
 create this ZIP because it intentionally has no installed SimHub SDK; a
 maintainer must build it against a real SimHub installation before publishing
 or attaching it to a release.
+
+The preferred no-game-DLL bundle is also a local SDK build. After both x86/x64
+`ffb_launcher` and `ffb_hook` targets exist,
+`simhub/tools/Build-LauncherPackage.ps1` creates
+`FFBInterceptor-Launcher-X.Y.Z.zip`. The builder copies an explicit allowlist,
+writes an internal SHA-256 manifest, creates a uniquely named partial archive,
+validates it, and only then atomically replaces the previous output. The tester
+rejects any extra, duplicate, escaping or non-canonical ZIP entry, requires the
+manifest to cover every file except itself, parses the scripts from the
+extracted archive, verifies that no `dinput8.dll` is present, and runs safe
+x86/x64 validation. In an administrator test context with SimHub closed it also
+executes an isolated fake-SimHub install, idempotent reinstall, tamper refusal,
+and rollback-backed uninstall/restoration lifecycle.
+
+The public release workflow intentionally does not build either SimHub bundle:
+GitHub-hosted CI has no installed proprietary SimHub SDK. A maintainer must use
+a real local SimHub installation, run the package tester, record the final
+SHA-256, and review the exact ZIP contents before attaching either bundle.

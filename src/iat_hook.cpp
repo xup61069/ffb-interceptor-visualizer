@@ -125,8 +125,11 @@ std::size_t patch_import_descriptor(std::uint8_t* base,
 
 namespace ffb {
 
-std::size_t patch_direct_input8_imports(HMODULE module, void* original,
-                                        void* replacement) noexcept {
+namespace {
+
+std::size_t patch_direct_input8_imports_unchecked(HMODULE module,
+                                                  void* original,
+                                                  void* replacement) noexcept {
     if (!module || !original || !replacement) return 0;
 
     auto* base = reinterpret_cast<std::uint8_t*>(module);
@@ -185,6 +188,22 @@ std::size_t patch_direct_input8_imports(HMODULE module, void* original,
                                            original, replacement);
     }
     return patched;
+}
+
+}  // namespace
+
+std::size_t patch_direct_input8_imports(HMODULE module, void* original,
+                                        void* replacement) noexcept {
+#if defined(_MSC_VER)
+    __try {
+        return patch_direct_input8_imports_unchecked(module, original,
+                                                     replacement);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+#else
+    return patch_direct_input8_imports_unchecked(module, original, replacement);
+#endif
 }
 
 std::size_t patch_loaded_direct_input_imports(HMODULE excluded_module,

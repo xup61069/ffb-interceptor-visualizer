@@ -1,13 +1,21 @@
 # FFB Interceptor SimHub 外掛
 
-## 免編譯安裝包（建議）
+## 不改遊戲 DLL 的免編譯包（建議）
+
+取得 `FFBInterceptor-Launcher-*.zip` 後，完整解壓並雙擊
+`Start-FFBInterceptor.cmd`。第一次只會安裝 SimHub 外掛並開啟 SimHub；在
+**Settings → Plugins** 啟用 **FFB Interceptor** 後，再執行一次並選擇離線遊戲 EXE。
+程式會自動選擇 x86/x64 launcher，且 ZIP 不含 `dinput8.dll`、不會寫入遊戲資料夾。
+完整白話說明見包內 `README.zh-TW.md`，或 [LAUNCHER.zh-TW.md](LAUNCHER.zh-TW.md)。
+
+## 傳統 proxy 免編譯包
 
 若取得 `FFBInterceptor-ReadyToUse-*.zip`，解壓後直接雙擊
 `Install-FFBInterceptor.cmd`，選取遊戲的 `.exe` 即可。它會自動選擇 x86/x64 proxy、
 備份既有 `dinput8.dll`、安裝 SimHub 外掛與開啟 Dashboard 匯入檔。詳細的安全與解除
 安裝說明見包內 `README.zh-TW.md`，或原始碼中的 [PORTABLE.zh-TW.md](PORTABLE.zh-TW.md)。
 
-## 安裝
+## 手動安裝傳統 proxy
 
 1. 關閉 SimHub。
 2. 將 `FFBInterceptor.SimHub.dll` 與 `FFBInterceptor.Core.dll` 複製到 SimHub 安裝目錄（通常是 `C:\Program Files (x86)\SimHub`）。
@@ -16,7 +24,7 @@
 5. 把本專案對應位元數的 `dinput8.dll` 放到遊戲執行檔旁；既有 Python viewer 可同時開啟。
 
 請先啟動 SimHub 與外掛，再啟動遊戲，讓偵測器從完整效果生命週期開始接收。
-若 Dashboard 顯示 `DATA GAP`，代表 proxy 已回報掉幀；外掛會捨棄可能過期的
+若 Dashboard 顯示 `DATA GAP`，代表 telemetry producer 已回報掉幀；外掛會捨棄可能過期的
 效果狀態以避免誤報，重新啟動遊戲即可建立可信的新 session。
 
 外掛監聽 `\\.\pipe\ffb-interceptor-simhub-v1`，Python viewer 仍使用原本的
@@ -30,7 +38,7 @@
 - 降到 95% 以下持續 500 ms 後解除
 
 判定的是遊戲送入 DirectInput 的命令訊號是否碰到 `DI_FFNOMINALMAX`，不是方向盤馬達的實際扭力。Constant、Ramp 與 Periodic 效果納入判定；Condition 與 Custom 效果仍會列入統計，但不會在資訊不足時硬判為削峰。
-遊戲成功呼叫 `Unacquire`，或 proxy 在輪詢時偵測到 acquisition loss（常見於
+遊戲成功呼叫 `Unacquire`，或攔截核心在輪詢時偵測到 acquisition loss（常見於
 失焦或切到背景）時，外掛會停止該裝置的播放狀態，避免留下假的削峰警示；後續
 `Start` 仍可沿用已保存的效果參數。
 

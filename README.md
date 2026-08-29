@@ -6,9 +6,9 @@ parameters in a live viewer. It forwards every DirectInput call and HRESULT
 unchanged. A graph labelled **Command Peak/RMS** describes the selected API
 channel; it is not a measurement of motor torque.
 
-Version 0.2.0 supports a C++17 `dinput8.dll` proxy for x86 and x64, a
-Python 3.12+ x64 PySide6/pyqtgraph viewer, and a .NET Framework 4.8 SimHub
-plug-in. The proxy is derived from
+Version 0.2.0 supports a C++17 `dinput8.dll` proxy and a no-game-DLL offline
+launcher/hook for x86 and x64, a Python 3.12+ x64 PySide6/pyqtgraph viewer,
+and a .NET Framework 4.8 SimHub plug-in. The proxy is derived from
 [walmis/dcs-force-feedback-fix](https://github.com/walmis/dcs-force-feedback-fix)
 v0.2 (MIT) and keeps its history. New code is GPL-3.0-only.
 
@@ -16,27 +16,30 @@ v0.2 (MIT) and keeps its history. New code is GPL-3.0-only.
 
 Only DirectInput8 devices created through `DirectInput8Create` are supported.
 GameInput, WinRT, XInput and private SDK paths are outside v0.2.0. There is no
-anti-cheat bypass, online-competition feature, driver/HID hook, memory scan,
-network service, or physical torque measurement. iRacing is
+anti-cheat bypass, online-competition feature, driver/HID hook, arbitrary
+memory scan, network service, or physical torque measurement. The launcher
+only parses bounded PE import data in the new child it creates. iRacing is
 explicitly unsupported as a support policy; GPL does not impose an additional
 use restriction.
 
 High-torque wheelbases can move unexpectedly. Keep hands clear, use a physical
-stop, begin at minimum gain, and test offline. A game directory may already
-contain another `dinput8.dll`: never overwrite it. Rename it to a backup and
-restore that exact file when removing this experiment. If the game fails to
-start, remove the proxy and viewer; the game then uses its normal system DLL.
+stop, begin at minimum gain, and test offline. The recommended launcher bundle
+contains no `dinput8.dll` and never writes the game directory. At runtime it
+loads its fixed sibling hook only into the new child it creates; it has no
+existing-PID or arbitrary-DLL interface and refuses elevated or Windows-system
+targets. The traditional proxy mode remains available. In that mode, never
+overwrite an existing game `dinput8.dll`; preserve and restore the exact file.
 
-## Build the proxy
+## Build the Windows producers
 
 Install Visual Studio 2022/2026 C++ tools, Windows SDK, CMake 3.20+, and
 Ninja. From a Visual Studio developer prompt:
 
 ```powershell
 cmake --preset msvc-x64-release
-cmake --build --preset x64-release --target dinput8 ffb_protocol_tests ffb_wrapper_tests ffb_dinput_wrapper_tests ffb_performance_tests ffb_telemetry_tests
+cmake --build --preset x64-release --target dinput8 ffb_hook ffb_launcher ffb_protocol_tests ffb_wrapper_tests ffb_dinput_wrapper_tests ffb_performance_tests ffb_telemetry_tests ffb_iat_hook_tests
 cmake --preset msvc-x86-release   # run from a -arch=x86 prompt
-cmake --build --preset x86-release --target dinput8 ffb_protocol_tests ffb_wrapper_tests ffb_dinput_wrapper_tests ffb_performance_tests ffb_telemetry_tests
+cmake --build --preset x86-release --target dinput8 ffb_hook ffb_launcher ffb_protocol_tests ffb_wrapper_tests ffb_dinput_wrapper_tests ffb_performance_tests ffb_telemetry_tests ffb_iat_hook_tests
 ctest --test-dir build/x64-release --output-on-failure
 ctest --test-dir build/x86-release --output-on-failure
 ```
@@ -44,6 +47,18 @@ ctest --test-dir build/x86-release --output-on-failure
 Copy the resulting `dinput8.dll` beside a game executable only after backing
 up an existing proxy. The proxy lazily loads the genuine System32 DLL and
 remains fail-open when the viewer is absent.
+
+For the no-game-DLL mode, keep each architecture's
+`FFBInterceptor.Launcher.exe` and `FFBInterceptor.Hook.dll` together, then run:
+
+```powershell
+.\FFBInterceptor.Launcher.exe --offline-only --game "C:\Games\Example\game.exe" --
+```
+
+The launcher synchronizes the child before its first entry-point instruction,
+loads only the fixed sibling hook, restores its temporary in-memory breakpoint,
+patches only an unmodified `dinput8.dll!DirectInput8Create` IAT pointer, and
+then detaches. It does not change the game EXE or any game-directory DLL.
 
 ## Run the viewer
 
@@ -73,7 +88,7 @@ inventing condition-force samples.
 
 ## Build and use the SimHub plug-in
 
-The plug-in and Python viewer coexist. The proxy writes to two independent
+The plug-in and Python viewer coexist. The proxy or launcher hook writes to two independent
 sinks: the existing `\\.\pipe\ffb-interceptor-v1` viewer pipe and
 `\\.\pipe\ffb-interceptor-simhub-v1`. Each sink has its own fixed queue,
 sender, drop accounting, and reconnect path, so a stalled consumer does not
@@ -90,8 +105,21 @@ redistributing SimHub assemblies. It includes the plug-in's two DLLs, an
 800×480 dashboard, a 480×160 high-contrast overlay, and Traditional Chinese
 installation instructions. See [simhub/README.md](simhub/README.md).
 
-To build a no-compile portable package after building both proxy architectures,
-run:
+After building both launcher/hook architectures, build the recommended
+no-game-DLL portable package with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File simhub\tools\Build-LauncherPackage.ps1
+```
+
+It produces `simhub/dist/FFBInterceptor-Launcher-0.2.0.zip`. Extract it and run
+`Start-FFBInterceptor.cmd`; first use installs the SimHub plug-in and opens
+SimHub, while later runs select and start the offline game. The archive is
+allowlisted and hash-manifested, contains no `dinput8.dll`, and its lifecycle
+test verifies install, tamper refusal, and restoration. See
+[simhub/LAUNCHER.zh-TW.md](simhub/LAUNCHER.zh-TW.md).
+
+The traditional proxy-based portable package is still built with:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File simhub\tools\Build-ReadyToUsePackage.ps1
@@ -123,8 +151,9 @@ format is documented in [docs/trace-format.md](docs/trace-format.md).
 
 ## Verification and release provenance
 
-The Windows CI matrix builds and tests both proxy architectures, Python
-3.12/3.13, the net48 clipping core, and both dashboard schemas. Its deterministic synthetic gates require the proxy queue hot path
+The Windows CI matrix builds and tests both proxy and launcher/hook
+architectures, Python 3.12/3.13, the net48 clipping core, and both dashboard
+schemas. Its deterministic synthetic gates require the telemetry queue hot path
 to stay below 100 microseconds p99 at 1,000+ events/second, named-pipe
 ingestion below 5 milliseconds p99 at the same rate, and the Qt refresh path
 to remain below a 30 FPS frame budget while its timer runs at 60 Hz. The pipe

@@ -1,0 +1,22 @@
+flowchart LR
+  user[使用者] --> start[Start-FFBInterceptor.cmd]
+  start --> simhub[SimHub 外掛與本機 Pipe]
+  start --> launcher[架構相符的離線 Launcher]
+
+  subgraph child[Launcher 新建立的唯一子程序]
+    loader[Windows Loader 完成初始化]
+    sync[入口點記憶體同步點]
+    hook[固定 sibling Hook DLL]
+    iat[精確 DirectInput8Create IAT 指標]
+    wrapper[共用 DirectInput 包裝與 Telemetry]
+    loader --> sync
+    sync -->|還原原位元組並停在第一條指令前| hook
+    hook --> iat
+    iat --> wrapper
+  end
+
+  launcher -->|DEBUG_ONLY_THIS_PROCESS| loader
+  launcher -->|只載入固定路徑| hook
+  wrapper -->|兩條獨立 Named Pipe| simhub
+  simhub --> detector[60 Hz 削峰狀態引擎]
+  detector --> dashboard[Dashboard 與事件]
