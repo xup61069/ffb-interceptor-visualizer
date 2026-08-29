@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #undef NDEBUG
+#include "intercept_create.h"
 #include "wrapper_dinput8.h"
 
 #include <cassert>
@@ -80,6 +81,23 @@ private:
     ULONG m_refs = 1;
 };
 
+FakeDirectInput* g_create_result = nullptr;
+
+HRESULT WINAPI fake_direct_input_create(HINSTANCE, DWORD, REFIID riid,
+                                        LPVOID* out, LPUNKNOWN) {
+    if (!out) return E_POINTER;
+    *out = nullptr;
+    if (!g_create_result) return E_FAIL;
+    if (riid == IID_IDirectInput8A) {
+        *out = static_cast<IDirectInput8A*>(g_create_result);
+    } else if (riid == IID_IDirectInput8W) {
+        *out = static_cast<IDirectInput8W*>(g_create_result);
+    } else {
+        return E_NOINTERFACE;
+    }
+    return S_OK;
+}
+
 }  // namespace
 
 int main() {
@@ -120,6 +138,21 @@ int main() {
     assert(fallback_fake->refs() == 1);
     assert(fallback_fake->Release() == 0);
     delete fallback_fake;
+
+    // Proxy and launcher modes share the same creation wrapper.  The helper
+    // preserves HRESULT while replacing only supported, non-aggregated A/W
+    // interfaces with the telemetry-aware COM wrapper.
+    g_create_result = new FakeDirectInput();
+    void* created = nullptr;
+    assert(ffb::intercept_direct_input8_create(
+               fake_direct_input_create, nullptr, DIRECTINPUT_VERSION,
+               IID_IDirectInput8A, &created, nullptr) == S_OK);
+    assert(created != static_cast<void*>(
+                          static_cast<IDirectInput8A*>(g_create_result)));
+    assert(static_cast<IDirectInput8A*>(created)->Release() == 0);
+    assert(g_create_result->refs() == 0);
+    delete g_create_result;
+    g_create_result = nullptr;
 
     delete fake;
     return 0;

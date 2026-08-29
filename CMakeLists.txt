@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_library(dinput8 SHARED
     src/dllmain.cpp
     src/proxy.cpp
+    src/intercept_create.cpp
     src/wrapper_effect.cpp
     src/wrapper_device8.cpp
     src/wrapper_dinput8.cpp
@@ -75,6 +76,7 @@ if(BUILD_TESTING)
 
     add_executable(ffb_dinput_wrapper_tests
         tests/cpp/dinput_wrapper_tests.cpp
+        src/intercept_create.cpp
         src/wrapper_dinput8.cpp
         src/wrapper_device8.cpp
         src/wrapper_effect.cpp
