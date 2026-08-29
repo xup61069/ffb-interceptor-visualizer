@@ -28,8 +28,32 @@ jobs:
         shell: pwsh
         run: |
           $devcmd = 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat'
-          cmd.exe /d /c "call `"$devcmd`" -arch=$env:BUILD_ARCH >nul && cmake -S . -B build\$env:BUILD_ARCH -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build\$env:BUILD_ARCH --target dinput8 ffb_protocol_tests ffb_wrapper_tests ffb_dinput_wrapper_tests ffb_performance_tests && ctest --test-dir build\$env:BUILD_ARCH --output-on-failure"
+          cmd.exe /d /c "call `"$devcmd`" -arch=$env:BUILD_ARCH >nul && cmake -S . -B build\$env:BUILD_ARCH -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build\$env:BUILD_ARCH --target dinput8 ffb_protocol_tests ffb_wrapper_tests ffb_dinput_wrapper_tests ffb_performance_tests ffb_telemetry_tests && ctest --test-dir build\$env:BUILD_ARCH --output-on-failure"
           exit $LASTEXITCODE
+
+  simhub-core:
+    name: simhub-core-net48
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Build and test clipping core
+        shell: pwsh
+        run: |
+          dotnet build simhub\FFBInterceptor.Core.Tests\FFBInterceptor.Core.Tests.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & simhub\FFBInterceptor.Core.Tests\bin\Release\net48\FFBInterceptor.Core.Tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Validate and package Dash Studio assets
+        shell: pwsh
+        run: |
+          & simhub\tools\Test-Dashboards.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & simhub\tools\Build-Dashboards.ps1 -OutputDirectory "$env:RUNNER_TEMP\ffb-dashboards"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $packages = @(Get-ChildItem "$env:RUNNER_TEMP\ffb-dashboards" -Filter '*.simhubdash')
+          if ($packages.Count -ne 2) { throw 'Dashboard packaging did not produce exactly two archives.' }
 
   viewer:
     name: viewer-py${{ matrix.python }}

@@ -38,6 +38,23 @@ std::vector<std::uint8_t> load_golden_fixture() {
 }  // namespace
 
 int main() {
+    std::string emoji_name;
+    for (int index = 0; index < 16; ++index)
+        emoji_name.append("\xF0\x9F\x98\x80");
+    char truncated_name[64]{};
+    assert(ffb::copy_utf8_truncated(truncated_name, sizeof(truncated_name),
+                                    emoji_name) == 60);
+    assert(std::string(truncated_name) == emoji_name.substr(0, 60));
+    assert(ffb::copy_utf8_truncated(truncated_name, sizeof(truncated_name),
+                                    std::string(100, 'a')) == 63);
+    assert(std::string(truncated_name) == std::string(63, 'a'));
+    const std::string long_non_ascii_basename = emoji_name + emoji_name + ".exe";
+    assert(ffb::copy_utf8_truncated(
+               truncated_name, sizeof(truncated_name),
+               long_non_ascii_basename.data(), long_non_ascii_basename.size()) ==
+           60);
+    assert(std::string(truncated_name) == emoji_name.substr(0, 60));
+
     ffb::Event event{};
     event.type = ffb::MessageType::EffectParametersChanged;
     event.effect_kind = ffb::EffectKind::Constant;
@@ -80,6 +97,37 @@ int main() {
     ffb::fill_effect_parameters(opaque, &empty_effect);
     assert(opaque.type_specific_size == 0);
     assert(opaque.custom_redacted);
+
+    // A partial SetParameters call must not touch pointer fields that are not
+    // selected by DIEP_* flags.  Games commonly leave those fields unset.
+    ffb::Event partial{};
+    partial.type = ffb::MessageType::EffectParametersChanged;
+    partial.effect_kind = ffb::EffectKind::Constant;
+    partial.flags = DIEP_GAIN;
+    DIEFFECT partial_effect{};
+    partial_effect.dwSize = sizeof(partial_effect);
+    partial_effect.dwGain = 4321;
+    partial_effect.cAxes = 8;
+    partial_effect.rgdwAxes = reinterpret_cast<LPDWORD>(1);
+    partial_effect.rglDirection = reinterpret_cast<LPLONG>(1);
+    partial_effect.lpvTypeSpecificParams = reinterpret_cast<LPVOID>(1);
+    partial_effect.cbTypeSpecificParams = sizeof(DICONSTANTFORCE);
+    ffb::fill_effect_parameters(partial, &partial_effect);
+    assert(partial.gain == 4321);
+    assert(partial.axis_count == 0);
+    assert(partial.type_specific_size == 0);
+    assert(partial.magnitude == 0);
+
+    ffb::Event legacy{};
+    legacy.type = ffb::MessageType::EffectCreated;
+    legacy.effect_kind = ffb::EffectKind::Constant;
+    DIEFFECT_DX5 legacy_effect{};
+    legacy_effect.dwSize = sizeof(legacy_effect);
+    legacy_effect.dwGain = 9876;
+    ffb::fill_effect_parameters(
+        legacy, reinterpret_cast<const DIEFFECT*>(&legacy_effect));
+    assert(legacy.gain == 9876);
+    assert(legacy.start_delay == 0);
 
     ffb::Event golden{};
     golden.type = ffb::MessageType::EffectParametersChanged;

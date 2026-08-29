@@ -2,7 +2,7 @@
 $ErrorActionPreference = 'Stop'
 
 <#
-  Check the SPDX marker on every tracked implementation/build file with a
+  Check the SPDX marker on every tracked or new implementation/build file with a
   comment-compatible format that is distributed in source or binary archives.
   The wrapper files derived from
   walmis/dcs-force-feedback-fix remain MIT; all project-authored files are GPL.
@@ -19,20 +19,23 @@ $mitFiles = @(
     'src/wrapper_effect.h'
 )
 
-$tracked = @(git ls-files)
+$workspaceFiles = @(
+    git ls-files
+    git ls-files --others --exclude-standard
+)
 $targets = @(
-    $tracked | Where-Object {
-        $_ -match '^(src|tests/cpp|viewer/src|viewer/tests|\.github/scripts)/.*\.(cpp|h|py|ps1)$' -or
+    $workspaceFiles | Where-Object {
+        $_ -match '^(src|tests/cpp|viewer/src|viewer/tests|simhub|\.github/scripts)/.*\.(cpp|h|cs|py|ps1)$' -or
         $_ -match '^viewer/[^/]+\.py$'
     }
-    $tracked | Where-Object { $_ -in @('CMakeLists.txt', 'dinput8.def', 'viewer/pyproject.toml') }
+    $workspaceFiles | Where-Object { $_ -in @('CMakeLists.txt', 'dinput8.def', 'viewer/pyproject.toml') }
 )
 
 $marker = [regex]'(?m)^\s*(?://|#|;)\s*SPDX-License-Identifier:\s*(MIT|GPL-3\.0-only)\s*$'
 $failures = @()
 foreach ($path in ($targets | Sort-Object -Unique)) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-        $failures += "$path (tracked file is missing from the workspace)"
+        $failures += "$path (source file is missing from the workspace)"
         continue
     }
     $head = (Get-Content -LiteralPath $path -TotalCount 16) -join "`n"

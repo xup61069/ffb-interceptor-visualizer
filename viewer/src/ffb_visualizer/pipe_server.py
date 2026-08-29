@@ -8,7 +8,7 @@ import os
 import threading
 from collections.abc import Callable
 
-from .protocol import ProtocolError, iter_frames
+from .protocol import Frame, ProtocolError, iter_frames
 
 PIPE_NAME = r"\\.\pipe\ffb-interceptor-v1"
 
@@ -19,7 +19,7 @@ class PipeServer:
     _MAX_CLIENTS = 32
     _READ_CHUNK_SIZE = 4 * 1024
 
-    def __init__(self, on_frame: Callable[[object], None]) -> None:
+    def __init__(self, on_frame: Callable[[Frame], None]) -> None:
         self._on_frame = on_frame
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -34,8 +34,13 @@ class PipeServer:
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
-        self._thread = threading.Thread(target=self._run, name="ffb-pipe", daemon=True)
-        self._thread.start()
+        thread = threading.Thread(target=self._run, name="ffb-pipe", daemon=True)
+        self._thread = thread
+        try:
+            thread.start()
+        except RuntimeError:
+            self._thread = None
+            raise
 
     def stop(self) -> None:
         self._stop.set()
@@ -197,7 +202,14 @@ class PipeServer:
                 with self._clients_lock:
                     self._clients.add(client)
                     self._client_handles.add(handle)
-                client.start()
+                    try:
+                        # Start while holding the registry lock so stop()
+                        # can never snapshot and Join an unstarted thread.
+                        client.start()
+                    except RuntimeError:
+                        self._clients.discard(client)
+                        self._client_handles.discard(handle)
+                        raise
                 handle = None  # Ownership moved to _read_client.
             except (OSError, RuntimeError, pywintypes.error):
                 self.errors += 1
@@ -213,6 +225,7 @@ class PipeServer:
 
         client_pid = _client_pid(handle)
         first_frame = True
+        last_sequence: int | None = None
         buf = bytearray()
         protocol_failed = False
         try:
@@ -231,6 +244,11 @@ class PipeServer:
                             raise ProtocolError("first frame must be Hello")
                         if first_frame and (client_pid is None or frame.process_id != client_pid):
                             raise ProtocolError("Hello PID does not match pipe client")
+                        if not first_frame and frame.message_type == 1:
+                            raise ProtocolError("duplicate Hello frame")
+                        if last_sequence is not None and frame.sequence <= last_sequence:
+                            raise ProtocolError("frame sequence must be strictly increasing")
+                        last_sequence = frame.sequence
                         first_frame = False
                         try:
                             self._on_frame(frame)

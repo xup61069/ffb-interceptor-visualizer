@@ -110,6 +110,10 @@ std::uint64_t qpc_now();
 std::uint32_t qpc_frequency();
 EffectKind effect_kind_from_guid(REFGUID guid);
 void fill_effect_parameters(Event& event, const DIEFFECT* effect) noexcept;
+std::size_t copy_utf8_truncated(char* out, std::size_t capacity,
+                                const std::string& text) noexcept;
+std::size_t copy_utf8_truncated(char* out, std::size_t capacity,
+                                const char* text, std::size_t size) noexcept;
 
 // The wire header is always 32 bytes. All fields are explicitly serialized
 // little-endian; no compiler packing or ABI assumptions cross the pipe.

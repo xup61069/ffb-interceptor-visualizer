@@ -80,32 +80,82 @@ EffectKind effect_kind_from_guid(REFGUID guid) {
     return EffectKind::Unknown;
 }
 
+std::size_t copy_utf8_truncated(char* out, std::size_t capacity,
+                                const std::string& text) noexcept {
+    return copy_utf8_truncated(out, capacity, text.data(), text.size());
+}
+
+std::size_t copy_utf8_truncated(char* out, std::size_t capacity,
+                                const char* text, std::size_t size) noexcept {
+    if (!out || capacity == 0) return 0;
+    if (!text && size != 0) {
+        out[0] = '\0';
+        return 0;
+    }
+    std::size_t length = std::min(size, capacity - 1);
+    if (length < size) {
+        // If the first excluded byte is a UTF-8 continuation byte, the
+        // prefix ends inside a multi-byte code point. Drop that whole code
+        // point so strict consumers never reject the frame.
+        while (length > 0 &&
+               (static_cast<unsigned char>(text[length]) & 0xC0u) == 0x80u) {
+            --length;
+        }
+    }
+    if (length != 0) std::memcpy(out, text, length);
+    out[length] = '\0';
+    return length;
+}
+
 void fill_effect_parameters(Event& event, const DIEFFECT* effect) noexcept {
     if (!effect) return;
     __try {
+        // DirectInput accepts the legacy DX5-sized structure.  Never read
+        // dwStartDelay or any pointer fields before the caller-provided size
+        // proves that the common layout is present.
+        if (effect->dwSize < sizeof(DIEFFECT_DX5)) {
+            event.custom_redacted = event.effect_kind == EffectKind::Custom ||
+                                    event.effect_kind == EffectKind::Unknown;
+            return;
+        }
+        const bool capture_all = event.type == MessageType::EffectCreated;
+        const auto requested = event.flags;
+        const auto captures = [capture_all, requested](DWORD flag) noexcept {
+            return capture_all || (requested & flag) != 0;
+        };
         event.di_flags = effect->dwFlags;
-        event.duration = effect->dwDuration;
-        event.sample_period = effect->dwSamplePeriod;
-        event.gain = effect->dwGain;
-        event.start_delay = effect->dwStartDelay;
-        event.trigger_button = effect->dwTriggerButton;
-        event.trigger_repeat = effect->dwTriggerRepeatInterval;
-        event.axis_count = static_cast<std::uint32_t>(
-            std::min<std::size_t>(effect->cAxes, kMaxAxes));
-        if (effect->rgdwAxes) {
+        if (captures(DIEP_DURATION)) event.duration = effect->dwDuration;
+        if (captures(DIEP_SAMPLEPERIOD)) event.sample_period = effect->dwSamplePeriod;
+        if (captures(DIEP_GAIN)) event.gain = effect->dwGain;
+        if (captures(DIEP_STARTDELAY) && effect->dwSize >= sizeof(DIEFFECT))
+            event.start_delay = effect->dwStartDelay;
+        if (captures(DIEP_TRIGGERBUTTON)) event.trigger_button = effect->dwTriggerButton;
+        if (captures(DIEP_TRIGGERREPEATINTERVAL))
+            event.trigger_repeat = effect->dwTriggerRepeatInterval;
+        if (captures(DIEP_AXES) || captures(DIEP_DIRECTION)) {
+            event.axis_count = static_cast<std::uint32_t>(
+                std::min<std::size_t>(effect->cAxes, kMaxAxes));
+        }
+        if (captures(DIEP_AXES) && effect->rgdwAxes) {
             for (std::size_t i = 0; i < event.axis_count; ++i)
                 event.axes[i] = static_cast<std::int32_t>(effect->rgdwAxes[i]);
         }
-        if (effect->rglDirection) {
+        if (captures(DIEP_DIRECTION) && effect->rglDirection) {
             for (std::size_t i = 0; i < event.axis_count; ++i)
                 event.directions[i] = effect->rglDirection[i];
         }
-        if (effect->lpEnvelope && effect->lpEnvelope->dwSize >= sizeof(DIENVELOPE)) {
+        if (captures(DIEP_ENVELOPE) && effect->lpEnvelope &&
+            effect->lpEnvelope->dwSize >= sizeof(DIENVELOPE)) {
             event.envelope_attack_level = effect->lpEnvelope->dwAttackLevel;
             event.envelope_attack_time = effect->lpEnvelope->dwAttackTime;
             event.envelope_fade_level = effect->lpEnvelope->dwFadeLevel;
             event.envelope_fade_time = effect->lpEnvelope->dwFadeTime;
         }
+        if (event.effect_kind == EffectKind::Custom ||
+            event.effect_kind == EffectKind::Unknown) {
+            event.custom_redacted = true;
+        }
+        if (!captures(DIEP_TYPESPECIFICPARAMS)) return;
         event.type_specific_size = effect->cbTypeSpecificParams;
         if (!effect->lpvTypeSpecificParams || event.type_specific_size == 0) {
             // Custom/unknown effects never expose their opaque bytes.  Keep
@@ -148,11 +198,11 @@ void fill_effect_parameters(Event& event, const DIEFFECT* effect) noexcept {
             case EffectKind::Damper:
             case EffectKind::Inertia:
             case EffectKind::Friction: {
-                const std::size_t count = std::min<std::size_t>(
-                    event.axis_count == 0 ? 1 : event.axis_count, kMaxAxes);
                 if (event.type_specific_size >= sizeof(DICONDITION)) {
                     const auto* values = static_cast<const DICONDITION*>(effect->lpvTypeSpecificParams);
                     const std::size_t available = event.type_specific_size / sizeof(DICONDITION);
+                    const std::size_t count = std::min<std::size_t>(
+                        event.axis_count == 0 ? available : event.axis_count, kMaxAxes);
                     event.condition_count = static_cast<std::uint32_t>(std::min(count, available));
                     for (std::size_t i = 0; i < event.condition_count; ++i) {
                         event.conditions[i].offset = values[i].lOffset;

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 cmake_minimum_required(VERSION 3.20)
-project(ffb_interceptor VERSION 0.1.23 LANGUAGES CXX)
+project(ffb_interceptor VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -109,4 +109,23 @@ if(BUILD_TESTING)
     endif()
     target_link_libraries(ffb_performance_tests PRIVATE ole32 dxguid)
     add_test(NAME ffb_performance_tests COMMAND ffb_performance_tests)
+
+    add_executable(ffb_telemetry_tests
+        tests/cpp/telemetry_tests.cpp
+        src/telemetry_protocol.cpp
+        src/telemetry.cpp
+    )
+    target_include_directories(ffb_telemetry_tests PRIVATE src)
+    target_compile_definitions(ffb_telemetry_tests PRIVATE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        FFB_TESTING
+    )
+    if (MSVC)
+        target_compile_options(ffb_telemetry_tests PRIVATE /W4 /WX /EHsc)
+    else()
+        target_compile_options(ffb_telemetry_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+    target_link_libraries(ffb_telemetry_tests PRIVATE ole32 dxguid)
+    add_test(NAME ffb_telemetry_tests COMMAND ffb_telemetry_tests)
 endif()

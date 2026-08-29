@@ -6,17 +6,18 @@ parameters in a live viewer. It forwards every DirectInput call and HRESULT
 unchanged. A graph labelled **Command Peak/RMS** describes the selected API
 channel; it is not a measurement of motor torque.
 
-Version 0.1.23 supports a C++17 `dinput8.dll` proxy for x86 and x64 and a
-Python 3.12+ x64 PySide6/pyqtgraph viewer. The proxy is derived from
+Version 0.2.0 supports a C++17 `dinput8.dll` proxy for x86 and x64, a
+Python 3.12+ x64 PySide6/pyqtgraph viewer, and a .NET Framework 4.8 SimHub
+plug-in. The proxy is derived from
 [walmis/dcs-force-feedback-fix](https://github.com/walmis/dcs-force-feedback-fix)
 v0.2 (MIT) and keeps its history. New code is GPL-3.0-only.
 
 ## Scope and safety
 
 Only DirectInput8 devices created through `DirectInput8Create` are supported.
-GameInput, WinRT, XInput and private SDK paths are outside v0.1. There is no
+GameInput, WinRT, XInput and private SDK paths are outside v0.2.0. There is no
 anti-cheat bypass, online-competition feature, driver/HID hook, memory scan,
-network service, SimHub plug-in, or physical torque measurement. iRacing is
+network service, or physical torque measurement. iRacing is
 explicitly unsupported as a support policy; GPL does not impose an additional
 use restriction.
 
@@ -33,9 +34,9 @@ Ninja. From a Visual Studio developer prompt:
 
 ```powershell
 cmake --preset msvc-x64-release
-cmake --build --preset x64-release --target dinput8 ffb_protocol_tests ffb_wrapper_tests ffb_dinput_wrapper_tests ffb_performance_tests
+cmake --build --preset x64-release --target dinput8 ffb_protocol_tests ffb_wrapper_tests ffb_dinput_wrapper_tests ffb_performance_tests ffb_telemetry_tests
 cmake --preset msvc-x86-release   # run from a -arch=x86 prompt
-cmake --build --preset x86-release --target dinput8 ffb_protocol_tests ffb_wrapper_tests ffb_dinput_wrapper_tests ffb_performance_tests
+cmake --build --preset x86-release --target dinput8 ffb_protocol_tests ffb_wrapper_tests ffb_dinput_wrapper_tests ffb_performance_tests ffb_telemetry_tests
 ctest --test-dir build/x64-release --output-on-failure
 ctest --test-dir build/x86-release --output-on-failure
 ```
@@ -70,6 +71,33 @@ process ID so device/effect IDs remain attributable when multiple producers
 are selected. The raw-details pane shows the last selected command without
 inventing condition-force samples.
 
+## Build and use the SimHub plug-in
+
+The plug-in and Python viewer coexist. The proxy writes to two independent
+sinks: the existing `\\.\pipe\ffb-interceptor-v1` viewer pipe and
+`\\.\pipe\ffb-interceptor-simhub-v1`. Each sink has its own fixed queue,
+sender, drop accounting, and reconnect path, so a stalled consumer does not
+back-pressure the other one.
+
+With SimHub installed, build and package the plug-in against its local SDK:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File simhub\tools\Build-SimHubPackage.ps1
+```
+
+This produces an ignored `simhub/dist/FFBInterceptor-SimHub-0.2.0.zip` without
+redistributing SimHub assemblies. It includes the plug-in's two DLLs, an
+800×480 dashboard, a 480×160 high-contrast overlay, and Traditional Chinese
+installation instructions. See [simhub/README.md](simhub/README.md).
+
+The default detector enters at 98%, exits below 95%, triggers after 100 ms of
+continuous saturation or 5% clipped time in a trailing second, and holds the
+exit for 500 ms. It detects DirectInput command saturation at
+`DI_FFNOMINALMAX`; it does not claim physical motor torque. Constant, Ramp,
+and Periodic effects are eligible. Condition and Custom effects are counted
+but excluded from the verdict because their actual force cannot be recovered
+from these parameters alone.
+
 ## Protocol
 
 Protocol v1 uses an explicit little-endian 32-byte header and a bounded,
@@ -81,8 +109,8 @@ format is documented in [docs/trace-format.md](docs/trace-format.md).
 
 ## Verification and release provenance
 
-The Windows CI matrix builds and tests both proxy architectures and Python
-3.12/3.13. Its deterministic synthetic gates require the proxy queue hot path
+The Windows CI matrix builds and tests both proxy architectures, Python
+3.12/3.13, the net48 clipping core, and both dashboard schemas. Its deterministic synthetic gates require the proxy queue hot path
 to stay below 100 microseconds p99 at 1,000+ events/second, named-pipe
 ingestion below 5 milliseconds p99 at the same rate, and the Qt refresh path
 to remain below a 30 FPS frame budget while its timer runs at 60 Hz. The pipe
@@ -104,7 +132,7 @@ and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Status
 
-v0.1.23 is a prerelease and is marked `UNSIGNED EXPERIMENTAL`. Synthetic
+v0.2.0 is a prerelease and is marked `UNSIGNED EXPERIMENTAL`. Synthetic
 protocol/queue tests are the release gate. Real hardware or commercial-game
 results are not compatibility claims unless accompanied by explicit
 authorization and reproducible evidence.

@@ -1,0 +1,340 @@
+{
+  "DashboardDebugManager": {},
+  "Version": 2,
+  "Id": "958f4466-3318-4c24-b472-0d193adfa2f1",
+  "BaseHeight": 480,
+  "BaseWidth": 800,
+  "BackgroundColor": "#FF101318",
+  "Screens": [
+    {
+      "RenderingSkip": 0,
+      "Name": "Command clipping",
+      "InGameScreen": true,
+      "IdleScreen": true,
+      "PitScreen": true,
+      "ScreenId": "d13e62fa-1820-45cf-88dc-b6cbe6f16d13",
+      "AllowOverlays": true,
+      "IsForegroundLayer": false,
+      "IsOverlayLayer": false,
+      "OverlayTriggerExpression": { "Expression": "" },
+      "ScreenEnabledExpression": { "Expression": "" },
+      "OverlayMaxDuration": 0,
+      "OverlayMinDuration": 0,
+      "IsBackgroundLayer": false,
+      "BackgroundColor": "#00101318",
+      "Items": [
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.RectangleItem, SimHub.Plugins",
+          "IsRectangleItem": true,
+          "BackgroundColor": "#FF101318",
+          "BorderStyle": {},
+          "Height": 480.0, "Left": 0.0, "Top": 0.0, "Visible": true, "Width": 800.0,
+          "Name": "Background", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.RectangleItem, SimHub.Plugins",
+          "IsRectangleItem": true,
+          "BackgroundColor": "#FF2E78D2",
+          "BorderStyle": {},
+          "Height": 6.0, "Left": 24.0, "Top": 22.0, "Visible": true, "Width": 64.0,
+          "Name": "Header accent", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0,
+          "Bindings": {
+            "BackgroundColor": {
+              "Formula": { "Expression": "if([FFBInterceptor.Connected],if([FFBInterceptor.DataReliable],if([FFBInterceptor.IsClipping],1,if([FFBInterceptor.AtLimit],0.5,0)),0.5),0)" },
+              "StartColor": "#FF2E78D2", "EnableMiddleColor": true, "MiddleColor": "#FFFFC107",
+              "MiddleColorValue": 0.5, "EndColor": "#FFFF5252", "StartColorValue": 0.0,
+              "EndColorValue": 1.0, "Mode": 4
+            }
+          }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "SemiBold", "FontSize": 24.0,
+          "Text": "FFB INTERCEPTOR", "TextColor": "#FFF4F6F8", "HorizontalAlignment": 0,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 42.0, "Left": 24.0, "Top": 29.0, "Visible": true, "Width": 310.0,
+          "Name": "Title", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Normal", "FontSize": 14.0,
+          "Text": "等待 producer", "TextColor": "#FFABB5C0", "HorizontalAlignment": 2,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 30.0, "Left": 355.0, "Top": 31.0, "Visible": true, "Width": 421.0,
+          "Name": "Source", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 32.0,
+          "Bindings": { "Text": { "Formula": { "Expression": "[FFBInterceptor.SelectedProcessName]" }, "Mode": 2 } }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.RectangleItem, SimHub.Plugins",
+          "IsRectangleItem": true, "BackgroundColor": "#FF1B2128",
+          "BorderStyle": { "BorderColor": "#FF39434E", "BorderTop": 1, "BorderBottom": 1, "BorderLeft": 1, "BorderRight": 1, "RadiusTopLeft": 5, "RadiusTopRight": 5, "RadiusBottomLeft": 5, "RadiusBottomRight": 5 },
+          "Height": 90.0, "Left": 24.0, "Top": 84.0, "Visible": true, "Width": 752.0,
+          "Name": "Command panel", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "SemiBold", "FontSize": 13.0,
+          "Text": "DIRECTINPUT COMMAND", "TextColor": "#FF9FAAB6", "HorizontalAlignment": 0,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 22.0, "Left": 40.0, "Top": 93.0, "Visible": true, "Width": 220.0,
+          "Name": "Command label", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.LinearGaugeItem, SimHub.Plugins",
+          "IsLinearGauge": true, "GaugeOrientation": 0, "GaugeAlignment": 0, "AutoSize": false,
+          "GaugeColor": "#FF64D3A3", "AlternateGaugeColor": "#FF64D3A3", "UseAlternateStyle": false,
+          "Minimum": 0.0, "Maximum": 100.0, "Value": 0.0, "Steps": 0.0, "PAW": 0.0, "Rotation": 0.0,
+          "BackgroundColor": "#FF29313A",
+          "BorderStyle": { "BorderColor": "#FF4A5562", "BorderTop": 1, "BorderBottom": 1, "BorderLeft": 1, "BorderRight": 1, "RadiusTopLeft": 3, "RadiusTopRight": 3, "RadiusBottomLeft": 3, "RadiusBottomRight": 3 },
+          "Height": 26.0, "Left": 40.0, "Top": 128.0, "Visible": true, "Width": 575.0,
+          "Name": "Command gauge", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 16.0,
+          "Bindings": {
+            "Value": { "Formula": { "Expression": "[FFBInterceptor.CommandPercent]" }, "Mode": 2 },
+            "GaugeColor": {
+              "Formula": { "Expression": "if([FFBInterceptor.Connected],if([FFBInterceptor.DataReliable],if([FFBInterceptor.IsClipping],1,if([FFBInterceptor.AtLimit],0.5,0)),0.5),0)" },
+              "StartColor": "#FF64D3A3", "EnableMiddleColor": true, "MiddleColor": "#FFFFC107",
+              "MiddleColorValue": 0.5, "EndColor": "#FFFF5252", "StartColorValue": 0.0,
+              "EndColorValue": 1.0, "Mode": 4
+            }
+          }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.RectangleItem, SimHub.Plugins",
+          "IsRectangleItem": true, "BackgroundColor": "#FFFFFFFF", "BorderStyle": {},
+          "Height": 34.0, "Left": 602.0, "Top": 124.0, "Visible": true, "Width": 3.0,
+          "Name": "Entry threshold marker", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0,
+          "Bindings": { "Left": { "Formula": { "Expression": "40 + 5.75 * [FFBInterceptor.EntryThresholdPercent] - 1.5" }, "Mode": 2, "TargetPropertyName": "Left" } }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "SemiBold", "FontSize": 11.0,
+          "Text": "98% ENTER", "TextColor": "#FFDDE3EA", "HorizontalAlignment": 2,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 18.0, "Left": 520.0, "Top": 95.0, "Visible": true, "Width": 95.0,
+          "Name": "Threshold label", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 100.0,
+          "Bindings": {
+            "Text": { "FormatString": "0.0\\% ENTER", "Formula": { "Expression": "[FFBInterceptor.EntryThresholdPercent]" }, "Mode": 2 },
+            "Left": { "Formula": { "Expression": "max(40,40 + 5.75 * [FFBInterceptor.EntryThresholdPercent] - 95)" }, "Mode": 2, "TargetPropertyName": "Left" }
+          }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Bold", "FontSize": 31.0,
+          "Text": "0.0%", "TextColor": "#FFFFFFFF", "HorizontalAlignment": 2,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 50.0, "Left": 627.0, "Top": 109.0, "Visible": true, "Width": 130.0,
+          "Name": "Command value", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 16.0,
+          "Bindings": { "Text": { "FormatString": "0.0\\%", "Formula": { "Expression": "[FFBInterceptor.CommandPercent]" }, "Mode": 2 } }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.RectangleItem, SimHub.Plugins",
+          "IsRectangleItem": true, "BackgroundColor": "#FF1B2128",
+          "BorderStyle": { "BorderColor": "#FF39434E", "BorderTop": 1, "BorderBottom": 1, "BorderLeft": 1, "BorderRight": 1, "RadiusTopLeft": 5, "RadiusTopRight": 5, "RadiusBottomLeft": 5, "RadiusBottomRight": 5 },
+          "Height": 126.0, "Left": 24.0, "Top": 190.0, "Visible": true, "Width": 220.0,
+          "Name": "State panel", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0,
+          "Bindings": {
+            "BackgroundColor": {
+              "Formula": { "Expression": "if([FFBInterceptor.Connected],if([FFBInterceptor.DataReliable],if([FFBInterceptor.IsClipping],1,if([FFBInterceptor.AtLimit],0.5,0)),0.5),0)" },
+              "StartColor": "#FF1B2128", "EnableMiddleColor": true, "MiddleColor": "#FF56450B",
+              "MiddleColorValue": 0.5, "EndColor": "#FF5A2023", "StartColorValue": 0.0,
+              "EndColorValue": 1.0, "Mode": 4
+            }
+          }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Bold", "FontSize": 31.0,
+          "Text": "HEADROOM", "TextColor": "#FFFFFFFF", "HorizontalAlignment": 1,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 55.0, "Left": 36.0, "Top": 208.0, "Visible": true, "Width": 196.0,
+          "Name": "State", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 16.0,
+          "Bindings": { "Text": { "Formula": { "Expression": "if([FFBInterceptor.Connected],if([FFBInterceptor.DataReliable],if([FFBInterceptor.IsClipping],'CLIP',if([FFBInterceptor.AtLimit],'LIMIT','HEADROOM')),'DATA GAP'),'WAIT')" }, "Mode": 2 } }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Normal", "FontSize": 12.0,
+          "Text": "98% / 95% HYSTERESIS", "TextColor": "#FFABB5C0", "HorizontalAlignment": 1,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 28.0, "Left": 36.0, "Top": 272.0, "Visible": true, "Width": 196.0,
+          "Name": "Hysteresis", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 100.0,
+          "Bindings": { "Text": { "Formula": { "Expression": "[FFBInterceptor.ThresholdText]" }, "Mode": 2 } }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.RectangleItem, SimHub.Plugins",
+          "IsRectangleItem": true, "BackgroundColor": "#FF1B2128",
+          "BorderStyle": { "BorderColor": "#FF39434E", "BorderTop": 1, "BorderBottom": 1, "BorderLeft": 1, "BorderRight": 1, "RadiusTopLeft": 5, "RadiusTopRight": 5, "RadiusBottomLeft": 5, "RadiusBottomRight": 5 },
+          "Height": 126.0, "Left": 260.0, "Top": 190.0, "Visible": true, "Width": 160.0,
+          "Name": "Ratio panel", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "SemiBold", "FontSize": 13.0,
+          "Text": "CLIP · 1 SECOND", "TextColor": "#FF9FAAB6", "HorizontalAlignment": 1,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 25.0, "Left": 272.0, "Top": 207.0, "Visible": true, "Width": 136.0,
+          "Name": "Ratio label", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 100.0,
+          "Bindings": { "Text": { "Formula": { "Expression": "[FFBInterceptor.ClipWindowText]" }, "Mode": 2 } }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Bold", "FontSize": 34.0,
+          "Text": "0.0%", "TextColor": "#FFFFFFFF", "HorizontalAlignment": 1,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 55.0, "Left": 272.0, "Top": 241.0, "Visible": true, "Width": 136.0,
+          "Name": "Ratio value", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 16.0,
+          "Bindings": { "Text": { "FormatString": "0.0\\%", "Formula": { "Expression": "[FFBInterceptor.ClipPercent]" }, "Mode": 2 } }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.RectangleItem, SimHub.Plugins",
+          "IsRectangleItem": true, "BackgroundColor": "#FF1B2128",
+          "BorderStyle": { "BorderColor": "#FF39434E", "BorderTop": 1, "BorderBottom": 1, "BorderLeft": 1, "BorderRight": 1, "RadiusTopLeft": 5, "RadiusTopRight": 5, "RadiusBottomLeft": 5, "RadiusBottomRight": 5 },
+          "Height": 126.0, "Left": 436.0, "Top": 190.0, "Visible": true, "Width": 160.0,
+          "Name": "Peak panel", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "SemiBold", "FontSize": 13.0,
+          "Text": "PEAK COMMAND", "TextColor": "#FF9FAAB6", "HorizontalAlignment": 1,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 25.0, "Left": 448.0, "Top": 207.0, "Visible": true, "Width": 136.0,
+          "Name": "Peak label", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Bold", "FontSize": 34.0,
+          "Text": "0.0%", "TextColor": "#FFFFFFFF", "HorizontalAlignment": 1,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 55.0, "Left": 448.0, "Top": 241.0, "Visible": true, "Width": 136.0,
+          "Name": "Peak value", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 32.0,
+          "Bindings": { "Text": { "FormatString": "0.0\\%", "Formula": { "Expression": "[FFBInterceptor.PeakCommandPercent]" }, "Mode": 2 } }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.RectangleItem, SimHub.Plugins",
+          "IsRectangleItem": true, "BackgroundColor": "#FF1B2128",
+          "BorderStyle": { "BorderColor": "#FF39434E", "BorderTop": 1, "BorderBottom": 1, "BorderLeft": 1, "BorderRight": 1, "RadiusTopLeft": 5, "RadiusTopRight": 5, "RadiusBottomLeft": 5, "RadiusBottomRight": 5 },
+          "Height": 126.0, "Left": 612.0, "Top": 190.0, "Visible": true, "Width": 164.0,
+          "Name": "Effective panel", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "SemiBold", "FontSize": 13.0,
+          "Text": "AFTER GAINS", "TextColor": "#FF9FAAB6", "HorizontalAlignment": 1,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 25.0, "Left": 624.0, "Top": 207.0, "Visible": true, "Width": 140.0,
+          "Name": "Effective label", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Bold", "FontSize": 34.0,
+          "Text": "0.0%", "TextColor": "#FFFFFFFF", "HorizontalAlignment": 1,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 55.0, "Left": 624.0, "Top": 241.0, "Visible": true, "Width": 140.0,
+          "Name": "Effective value", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 32.0,
+          "Bindings": { "Text": { "FormatString": "0.0\\%", "Formula": { "Expression": "[FFBInterceptor.EffectiveCommandPercent]" }, "Mode": 2 } }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.RectangleItem, SimHub.Plugins",
+          "IsRectangleItem": true, "BackgroundColor": "#FF171C22",
+          "BorderStyle": { "BorderColor": "#FF303943", "BorderTop": 1, "BorderBottom": 1, "BorderLeft": 1, "BorderRight": 1, "RadiusTopLeft": 5, "RadiusTopRight": 5, "RadiusBottomLeft": 5, "RadiusBottomRight": 5 },
+          "Height": 96.0, "Left": 24.0, "Top": 334.0, "Visible": true, "Width": 752.0,
+          "Name": "Diagnostics panel", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Consolas", "FontWeight": "Normal", "FontSize": 15.0,
+          "Text": "EFFECT GAIN  100.0%", "TextColor": "#FFDCE2E8", "HorizontalAlignment": 0,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 28.0, "Left": 42.0, "Top": 345.0, "Visible": true, "Width": 220.0,
+          "Name": "Effect gain", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 32.0,
+          "Bindings": { "Text": { "FormatString": "EFFECT GAIN  0.0\\%", "Formula": { "Expression": "[FFBInterceptor.EffectGainPercent]" }, "Mode": 2 } }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Consolas", "FontWeight": "Normal", "FontSize": 15.0,
+          "Text": "DEVICE GAIN  100.0%", "TextColor": "#FFDCE2E8", "HorizontalAlignment": 0,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 28.0, "Left": 42.0, "Top": 385.0, "Visible": true, "Width": 220.0,
+          "Name": "Device gain", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 32.0,
+          "Bindings": { "Text": { "FormatString": "DEVICE GAIN  0.0\\%", "Formula": { "Expression": "[FFBInterceptor.DeviceGainPercent]" }, "Mode": 2 } }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Consolas", "FontWeight": "Normal", "FontSize": 15.0,
+          "Text": "ACTIVE  0", "TextColor": "#FFDCE2E8", "HorizontalAlignment": 0,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 28.0, "Left": 292.0, "Top": 345.0, "Visible": true, "Width": 180.0,
+          "Name": "Active effects", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 32.0,
+          "Bindings": { "Text": { "FormatString": "ACTIVE  0", "Formula": { "Expression": "[FFBInterceptor.ActiveEffectCount]" }, "Mode": 2 } }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Consolas", "FontWeight": "Normal", "FontSize": 15.0,
+          "Text": "UNSUPPORTED  0", "TextColor": "#FFDCE2E8", "HorizontalAlignment": 0,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 28.0, "Left": 292.0, "Top": 385.0, "Visible": true, "Width": 200.0,
+          "Name": "Unsupported effects", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 32.0,
+          "Bindings": { "Text": { "FormatString": "UNSUPPORTED  0", "Formula": { "Expression": "[FFBInterceptor.UnsupportedEffectCount]" }, "Mode": 2 } }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Consolas", "FontWeight": "Normal", "FontSize": 15.0,
+          "Text": "DROPS  0", "TextColor": "#FFDCE2E8", "HorizontalAlignment": 0,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 28.0, "Left": 520.0, "Top": 345.0, "Visible": true, "Width": 230.0,
+          "Name": "Drops", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 100.0,
+          "Bindings": { "Text": { "FormatString": "DROPS  0", "Formula": { "Expression": "[FFBInterceptor.DroppedFrames]" }, "Mode": 2 } }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Consolas", "FontWeight": "Normal", "FontSize": 15.0,
+          "Text": "PROTOCOL ERRORS  0", "TextColor": "#FFDCE2E8", "HorizontalAlignment": 0,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 28.0, "Left": 520.0, "Top": 385.0, "Visible": true, "Width": 230.0,
+          "Name": "Protocol errors", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 100.0,
+          "Bindings": { "Text": { "FormatString": "PROTOCOL ERRORS  0", "Formula": { "Expression": "[FFBInterceptor.ProtocolErrors]" }, "Mode": 2 } }
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Normal", "FontSize": 12.0,
+          "Text": "COMMAND SIGNAL · NOT PHYSICAL MOTOR TORQUE", "TextColor": "#FF7F8A96", "HorizontalAlignment": 0,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 26.0, "Left": 24.0, "Top": 445.0, "Visible": true, "Width": 500.0,
+          "Name": "Definition", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0
+        },
+        {
+          "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Normal", "FontSize": 12.0,
+          "Text": "AUTO", "TextColor": "#FF7F8A96", "HorizontalAlignment": 2,
+          "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
+          "Height": 26.0, "Left": 600.0, "Top": 445.0, "Visible": true, "Width": 176.0,
+          "Name": "Selection mode", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 100.0,
+          "Bindings": { "Text": { "Formula": { "Expression": "[FFBInterceptor.SelectionMode]" }, "Mode": 2 } }
+        }
+      ],
+      "MinimumRefreshIntervalMS": 0.0
+    }
+  ],
+  "SnapToGrid": true,
+  "HideLabels": true,
+  "ShowForeground": true,
+  "ForegroundOpacity": 100.0,
+  "ShowBackground": true,
+  "BackgroundOpacity": 100.0,
+  "ShowBoundingRectangles": false,
+  "GridSize": 8,
+  "Images": [],
+  "Metadata": {
+    "ScreenCount": 1.0, "InGameScreensIndexs": [0], "IdleScreensIndexs": [0],
+    "MainPreviewIndex": 0, "IsOverlay": false, "OverlaySizeWarning": false,
+    "MetadataVersion": 2.0, "EnableOnDashboardMessaging": true, "PitScreensIndexs": [0],
+    "SimHubVersion": "9.11.22", "Category": "Force Feedback", "Title": "FFB Interceptor 800x480",
+    "Description": "DirectInput command clipping monitor", "Author": "FFB Interceptor contributors",
+    "Width": 800.0, "Height": 480.0, "DashboardVersion": "1.0.0"
+  },
+  "ShowOnScreenControls": true,
+  "IsOverlay": false,
+  "EnableClickThroughOverlay": false,
+  "EnableOnDashboardMessaging": true,
+  "UseStrictJSIsolation": true,
+  "UseStrictJSIsolationWarning": true
+}

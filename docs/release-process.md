@@ -50,4 +50,12 @@ The public `master` branch is protected by the active `master-protection`
 ruleset. Changes must arrive through a pull request, cannot delete or
 force-update the branch, and must pass the eight CI/Security job checks
 (`proxy-x64`, `proxy-x86`, `viewer-py3.12`, `viewer-py3.13`, `codeql-cpp`,
-`codeql-python`, `dependency-audit` and `history-and-workflow-audit`).
+`codeql-python`, `dependency-audit` and `history-and-workflow-audit`). The
+additional `simhub-core-net48` CI job builds the detector and secure-pipe tests
+without proprietary SDK assemblies and validates both Dash Studio packages.
+
+The installable SimHub adapter is compiled locally against the SDK in an
+installed SimHub copy by `simhub/tools/Build-SimHubPackage.ps1`. That package
+contains only project-owned DLLs and dashboards; SimHub assemblies are never
+vendored or redistributed. Public release automation must not substitute a
+fake SDK reference assembly for the installable binary.

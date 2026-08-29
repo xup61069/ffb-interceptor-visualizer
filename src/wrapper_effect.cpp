@@ -31,6 +31,7 @@ ULONG STDMETHODCALLTYPE WrapperEffect::Release() {
     if (count == 0) {
         ffb::Event event{};
         event.type = ffb::MessageType::EffectCommand;
+        event.effect_kind = ffb::effect_kind_from_guid(m_guid);
         event.command = static_cast<std::uint16_t>(ffb::EffectCommand::Release);
         event.process_id = GetCurrentProcessId();
         event.device_id = m_device_id;
@@ -79,6 +80,7 @@ HRESULT STDMETHODCALLTYPE WrapperEffect::Start(DWORD iterations, DWORD flags) {
     const HRESULT hr = m_real ? m_real->Start(iterations, flags) : DIERR_UNSUPPORTED;
     ffb::Event event{};
     event.type = ffb::MessageType::EffectCommand;
+    event.effect_kind = ffb::effect_kind_from_guid(m_guid);
     event.command = static_cast<std::uint16_t>(ffb::EffectCommand::Start);
     event.process_id = GetCurrentProcessId();
     event.device_id = m_device_id;
@@ -95,6 +97,7 @@ HRESULT STDMETHODCALLTYPE WrapperEffect::Stop() {
     const HRESULT hr = m_real ? m_real->Stop() : DIERR_UNSUPPORTED;
     ffb::Event event{};
     event.type = ffb::MessageType::EffectCommand;
+    event.effect_kind = ffb::effect_kind_from_guid(m_guid);
     event.command = static_cast<std::uint16_t>(ffb::EffectCommand::Stop);
     event.process_id = GetCurrentProcessId();
     event.device_id = m_device_id;
@@ -113,6 +116,7 @@ HRESULT STDMETHODCALLTYPE WrapperEffect::Download() {
     const HRESULT hr = m_real ? m_real->Download() : DIERR_UNSUPPORTED;
     ffb::Event event{};
     event.type = ffb::MessageType::EffectCommand;
+    event.effect_kind = ffb::effect_kind_from_guid(m_guid);
     event.command = static_cast<std::uint16_t>(ffb::EffectCommand::Download);
     event.process_id = GetCurrentProcessId();
     event.device_id = m_device_id;
@@ -127,6 +131,7 @@ HRESULT STDMETHODCALLTYPE WrapperEffect::Unload() {
     const HRESULT hr = m_real ? m_real->Unload() : DIERR_UNSUPPORTED;
     ffb::Event event{};
     event.type = ffb::MessageType::EffectCommand;
+    event.effect_kind = ffb::effect_kind_from_guid(m_guid);
     event.command = static_cast<std::uint16_t>(ffb::EffectCommand::Unload);
     event.process_id = GetCurrentProcessId();
     event.device_id = m_device_id;

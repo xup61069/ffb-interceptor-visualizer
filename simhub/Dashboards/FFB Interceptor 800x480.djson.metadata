@@ -1,0 +1,20 @@
+{
+  "ScreenCount": 1.0,
+  "InGameScreensIndexs": [0],
+  "IdleScreensIndexs": [0],
+  "MainPreviewIndex": 0,
+  "IsOverlay": false,
+  "ShowInTaskBar": true,
+  "Width": 800.0,
+  "Height": 480.0,
+  "OverlaySizeWarning": false,
+  "MetadataVersion": 2.0,
+  "EnableOnDashboardMessaging": true,
+  "PitScreensIndexs": [0],
+  "SimHubVersion": "9.11.22",
+  "Category": "Force Feedback",
+  "Title": "FFB Interceptor 800x480",
+  "Description": "DirectInput command clipping monitor",
+  "Author": "FFB Interceptor contributors",
+  "DashboardVersion": "1.0.0"
+}
