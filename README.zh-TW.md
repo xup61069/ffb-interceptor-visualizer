@@ -19,6 +19,12 @@ GPL 額外用途限制。
 資料夾若已有 `dinput8.dll`，絕對不要覆寫；先備份並在移除時還原原檔。啟動失敗時
 刪除本 proxy 與 viewer 即可回復系統 DLL。
 
+提供 `FFBInterceptor-ReadyToUse-*.zip` 時，使用者可解壓後雙擊
+`Install-FFBInterceptor.cmd`，選取遊戲 EXE。安裝器會判斷 x86/x64、備份既有 DLL、
+安裝 SimHub 外掛並開啟 Dashboard 匯入檔；解除安裝以
+`Uninstall-FFBInterceptor.cmd` 執行。流程與限制見
+[simhub/PORTABLE.zh-TW.md](simhub/PORTABLE.zh-TW.md)。
+
 viewer 提供 producer／device／effect 篩選、1／5／10／30 秒視窗、通道與 Condition
 軸切換、暫停、事件標記與原始參數面板。通道包含 Constant、Ramp、Periodic 的所有
 已觀察參數，以及 Condition 的 offset、coefficient、saturation、deadband；缺少的

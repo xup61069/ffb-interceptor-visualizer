@@ -1,5 +1,12 @@
 # FFB Interceptor SimHub 外掛
 
+## 免編譯安裝包（建議）
+
+若取得 `FFBInterceptor-ReadyToUse-*.zip`，解壓後直接雙擊
+`Install-FFBInterceptor.cmd`，選取遊戲的 `.exe` 即可。它會自動選擇 x86/x64 proxy、
+備份既有 `dinput8.dll`、安裝 SimHub 外掛與開啟 Dashboard 匯入檔。詳細的安全與解除
+安裝說明見包內 `README.zh-TW.md`，或原始碼中的 [PORTABLE.zh-TW.md](PORTABLE.zh-TW.md)。
+
 ## 安裝
 
 1. 關閉 SimHub。

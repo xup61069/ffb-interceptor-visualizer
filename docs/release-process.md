@@ -59,3 +59,11 @@ installed SimHub copy by `simhub/tools/Build-SimHubPackage.ps1`. That package
 contains only project-owned DLLs and dashboards; SimHub assemblies are never
 vendored or redistributed. Public release automation must not substitute a
 fake SDK reference assembly for the installable binary.
+
+After building that adapter and both proxy architectures locally,
+`simhub/tools/Build-ReadyToUsePackage.ps1` creates a portable ZIP. Its
+installer selects the game's architecture, makes recoverable backups, and
+tracks them for safe removal. The public release workflow does not currently
+create this ZIP because it intentionally has no installed SimHub SDK; a
+maintainer must build it against a real SimHub installation before publishing
+or attaching it to a release.

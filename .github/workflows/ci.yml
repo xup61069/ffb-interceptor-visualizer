@@ -54,6 +54,21 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $packages = @(Get-ChildItem "$env:RUNNER_TEMP\ffb-dashboards" -Filter '*.simhubdash')
           if ($packages.Count -ne 2) { throw 'Dashboard packaging did not produce exactly two archives.' }
+      - name: Parse portable installer scripts
+        shell: pwsh
+        run: |
+          $scripts = @(
+            'simhub\portable\Install-FFBInterceptor.ps1',
+            'simhub\portable\Uninstall-FFBInterceptor.ps1',
+            'simhub\tools\Build-ReadyToUsePackage.ps1',
+            'simhub\tools\Test-ReadyToUsePackage.ps1'
+          )
+          foreach ($scriptPath in $scripts) {
+            $tokens = $null
+            $errors = $null
+            [Management.Automation.Language.Parser]::ParseFile((Resolve-Path -LiteralPath $scriptPath), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) { throw "PowerShell syntax error in $scriptPath : $($errors[0].Message)" }
+          }
 
   viewer:
     name: viewer-py${{ matrix.python }}

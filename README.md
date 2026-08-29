@@ -90,6 +90,20 @@ redistributing SimHub assemblies. It includes the plug-in's two DLLs, an
 800×480 dashboard, a 480×160 high-contrast overlay, and Traditional Chinese
 installation instructions. See [simhub/README.md](simhub/README.md).
 
+To build a no-compile portable package after building both proxy architectures,
+run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File simhub\tools\Build-ReadyToUsePackage.ps1
+```
+
+It produces `simhub/dist/FFBInterceptor-ReadyToUse-0.2.0.zip`. Users extract it
+and run `Install-FFBInterceptor.cmd`; the installer asks for the game EXE,
+chooses the matching x86/x64 proxy, preserves an existing `dinput8.dll`,
+installs the SimHub plug-in, and opens both dashboard imports. The paired
+uninstaller verifies its installed hashes before restoring backups. See
+[simhub/PORTABLE.zh-TW.md](simhub/PORTABLE.zh-TW.md).
+
 The default detector enters at 98%, exits below 95%, triggers after 100 ms of
 continuous saturation or 5% clipped time in a trailing second, and holds the
 exit for 500 ms. It detects DirectInput command saturation at
