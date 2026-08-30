@@ -24,12 +24,57 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
-      - name: Build proxy and protocol tests
+      - name: Build proxy, launcher hook, and protocol tests
         shell: pwsh
         run: |
           $devcmd = 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat'
-          cmd.exe /d /c "call `"$devcmd`" -arch=$env:BUILD_ARCH >nul && cmake -S . -B build\$env:BUILD_ARCH -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build\$env:BUILD_ARCH --target dinput8 ffb_protocol_tests ffb_wrapper_tests ffb_dinput_wrapper_tests ffb_performance_tests && ctest --test-dir build\$env:BUILD_ARCH --output-on-failure"
+          cmd.exe /d /c "call `"$devcmd`" -arch=$env:BUILD_ARCH >nul && cmake -S . -B build\$env:BUILD_ARCH -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build\$env:BUILD_ARCH --target dinput8 ffb_hook ffb_launcher ffb_protocol_tests ffb_wrapper_tests ffb_dinput_wrapper_tests ffb_performance_tests ffb_telemetry_tests ffb_iat_hook_tests && ctest --test-dir build\$env:BUILD_ARCH --output-on-failure"
           exit $LASTEXITCODE
+
+  simhub-core:
+    name: simhub-core-net48
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Build and test clipping core
+        shell: pwsh
+        run: |
+          dotnet build simhub\FFBInterceptor.Core.Tests\FFBInterceptor.Core.Tests.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & simhub\FFBInterceptor.Core.Tests\bin\Release\net48\FFBInterceptor.Core.Tests.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Validate and package Dash Studio assets
+        shell: pwsh
+        run: |
+          & simhub\tools\Test-Dashboards.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & simhub\tools\Build-Dashboards.ps1 -OutputDirectory "$env:RUNNER_TEMP\ffb-dashboards"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $packages = @(Get-ChildItem "$env:RUNNER_TEMP\ffb-dashboards" -Filter '*.simhubdash')
+          if ($packages.Count -ne 2) { throw 'Dashboard packaging did not produce exactly two archives.' }
+      - name: Parse portable installer scripts
+        shell: pwsh
+        run: |
+          $scripts = @(
+            'simhub\portable\Install-FFBInterceptor.ps1',
+            'simhub\portable\Uninstall-FFBInterceptor.ps1',
+            'simhub\tools\Build-ReadyToUsePackage.ps1',
+            'simhub\tools\Test-ReadyToUsePackage.ps1',
+            'simhub\launcher-portable\FFBInterceptor.Common.ps1',
+            'simhub\launcher-portable\Install-SimHubPlugin.ps1',
+            'simhub\launcher-portable\Uninstall-SimHubPlugin.ps1',
+            'simhub\launcher-portable\Start-FFBInterceptor.ps1',
+            'simhub\tools\Build-LauncherPackage.ps1',
+            'simhub\tools\Test-LauncherPackage.ps1'
+          )
+          foreach ($scriptPath in $scripts) {
+            $tokens = $null
+            $errors = $null
+            [Management.Automation.Language.Parser]::ParseFile((Resolve-Path -LiteralPath $scriptPath), [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) { throw "PowerShell syntax error in $scriptPath : $($errors[0].Message)" }
+          }
 
   viewer:
     name: viewer-py${{ matrix.python }}

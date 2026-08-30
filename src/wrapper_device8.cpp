@@ -41,10 +41,25 @@ void emit_property(std::uint32_t device_id, REFGUID property,
     ffb::Telemetry::instance().emit(event);
 }
 
+void emit_device_command(std::uint32_t device_id, DWORD command,
+                         HRESULT hr) noexcept {
+    ffb::Event event{};
+    event.type = ffb::MessageType::DeviceCommand;
+    event.process_id = GetCurrentProcessId();
+    event.device_id = device_id;
+    event.di_flags = command;
+    event.hresult = hr;
+    ffb::Telemetry::instance().emit(event);
+}
+
 }  // namespace
 
 struct WrapperDevice8State {
     volatile LONG ref_count = 1;
+    // DirectInput devices begin unacquired. This gate suppresses repeated
+    // STOPALL telemetry while a backgrounded game polls and receives the
+    // same DIERR_INPUTLOST/DIERR_NOTACQUIRED result every frame.
+    volatile LONG playback_invalidated = 1;
     IDirectInputDevice8A* real_a = nullptr;
     IDirectInputDevice8W* real_w = nullptr;
     WrapperDevice8A* wrapper_a = nullptr;
@@ -78,6 +93,22 @@ struct WrapperDevice8State {
         return count;
     }
 };
+
+namespace {
+
+bool acquisition_is_lost(HRESULT hr) noexcept {
+    return hr == DIERR_INPUTLOST || hr == DIERR_NOTACQUIRED ||
+           hr == DIERR_OTHERAPPHASPRIO;
+}
+
+void invalidate_playback(WrapperDevice8State* state, std::uint32_t device_id,
+                         HRESULT telemetry_hr = DI_OK) noexcept {
+    if (state && InterlockedExchange(&state->playback_invalidated, 1) == 0) {
+        emit_device_command(device_id, DISFFC_STOPALL, telemetry_hr);
+    }
+}
+
+}  // namespace
 
 template<bool U>
 WrapperDevice8<U>::WrapperDevice8(Base* real, std::uint32_t device_id)
@@ -192,10 +223,41 @@ HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SetProperty(REFGUID guid, LPCDIPROP
     return hr;
 }
 
-template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Acquire() { return m_real->Acquire(); }
-template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Unacquire() { return m_real->Unacquire(); }
-template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetDeviceState(DWORD size, LPVOID data) { return m_real->GetDeviceState(size, data); }
-template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetDeviceData(DWORD size, LPDIDEVICEOBJECTDATA data, LPDWORD count, DWORD flags) { return m_real->GetDeviceData(size, data, count, flags); }
+template<bool U>
+HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Acquire() {
+    const HRESULT hr = m_real->Acquire();
+    if (SUCCEEDED(hr) && m_state) {
+        InterlockedExchange(&m_state->playback_invalidated, 0);
+    } else if (acquisition_is_lost(hr)) {
+        invalidate_playback(m_state, m_device_id);
+    }
+    return hr;
+}
+template<bool U>
+HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Unacquire() {
+    const HRESULT hr = m_real->Unacquire();
+    if (SUCCEEDED(hr)) {
+        // DirectInput unloads and therefore stops every effect on a
+        // successfully unacquired device. Reuse STOPALL on the wire so
+        // consumers retain cached parameters without reporting stale output.
+        invalidate_playback(m_state, m_device_id, hr);
+    }
+    return hr;
+}
+template<bool U>
+HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetDeviceState(DWORD size,
+                                                             LPVOID data) {
+    const HRESULT hr = m_real->GetDeviceState(size, data);
+    if (acquisition_is_lost(hr)) invalidate_playback(m_state, m_device_id);
+    return hr;
+}
+template<bool U>
+HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetDeviceData(
+    DWORD size, LPDIDEVICEOBJECTDATA data, LPDWORD count, DWORD flags) {
+    const HRESULT hr = m_real->GetDeviceData(size, data, count, flags);
+    if (acquisition_is_lost(hr)) invalidate_playback(m_state, m_device_id);
+    return hr;
+}
 template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SetDataFormat(LPCDIDATAFORMAT format) { return m_real->SetDataFormat(format); }
 template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SetEventNotification(HANDLE event) { return m_real->SetEventNotification(event); }
 template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SetCooperativeLevel(HWND window, DWORD flags) { return m_real->SetCooperativeLevel(window, flags); }
@@ -236,19 +298,18 @@ template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::GetForceFeedbackSt
 template<bool U>
 HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SendForceFeedbackCommand(DWORD flags) {
     const HRESULT hr = m_real->SendForceFeedbackCommand(flags);
-    ffb::Event event{};
-    event.type = ffb::MessageType::DeviceCommand;
-    event.process_id = GetCurrentProcessId();
-    event.device_id = m_device_id;
-    event.di_flags = flags;
-    event.hresult = hr;
-    ffb::Telemetry::instance().emit(event);
+    emit_device_command(m_device_id, flags, hr);
     return hr;
 }
 
 template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::EnumCreatedEffectObjects(LPDIENUMCREATEDEFFECTOBJECTSCALLBACK callback, LPVOID ref, DWORD flags) { return m_real->EnumCreatedEffectObjects(callback, ref, flags); }
 template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Escape(LPDIEFFESCAPE escape) { return m_real->Escape(escape); }
-template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Poll() { return m_real->Poll(); }
+template<bool U>
+HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Poll() {
+    const HRESULT hr = m_real->Poll();
+    if (acquisition_is_lost(hr)) invalidate_playback(m_state, m_device_id);
+    return hr;
+}
 template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SendDeviceData(DWORD size, LPCDIDEVICEOBJECTDATA data, LPDWORD count, DWORD flags) { return m_real->SendDeviceData(size, data, count, flags); }
 template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::BuildActionMap(ActFmtT* format, const Char* user, DWORD flags) { return m_real->BuildActionMap(format, user, flags); }
 template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SetActionMap(ActFmtT* format, const Char* user, DWORD flags) { return m_real->SetActionMap(format, user, flags); }

@@ -62,7 +62,7 @@ void emit_device(std::uint32_t id, REFGUID guid, HRESULT hr,
     event.device_id = id;
     event.effect_guid = guid;
     event.hresult = hr;
-    strncpy_s(event.text, sizeof(event.text), name.c_str(), _TRUNCATE);
+    ffb::copy_utf8_truncated(event.text, sizeof(event.text), name);
     ffb::Telemetry::instance().emit(event);
 }
 

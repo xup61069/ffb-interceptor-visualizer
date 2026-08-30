@@ -11,6 +11,8 @@ install_manifest.txt
 compile_commands.json
 
 # Compiled output
+[Bb]in/
+[Oo]bj/
 *.dll
 *.lib
 *.exp

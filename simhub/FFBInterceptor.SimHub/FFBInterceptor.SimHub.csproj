@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <OutputType>Library</OutputType>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <Deterministic>true</Deterministic>
+    <AssemblyName>FFBInterceptor.SimHub</AssemblyName>
+    <RootNamespace>FFBInterceptor.SimHub</RootNamespace>
+    <Version>0.2.0</Version>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <SIMHUB_INSTALL_PATH Condition="'$(SIMHUB_INSTALL_PATH)' == ''">C:\Program Files (x86)\SimHub</SIMHUB_INSTALL_PATH>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\FFBInterceptor.Core\FFBInterceptor.Core.csproj" />
+    <Reference Include="GameReaderCommon">
+      <HintPath>$(SIMHUB_INSTALL_PATH)\GameReaderCommon.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="log4net">
+      <HintPath>$(SIMHUB_INSTALL_PATH)\log4net.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SimHub.Logging">
+      <HintPath>$(SIMHUB_INSTALL_PATH)\SimHub.Logging.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SimHub.Plugins">
+      <HintPath>$(SIMHUB_INSTALL_PATH)\SimHub.Plugins.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+  <Target Name="ValidateSimHubSdk" BeforeTargets="ResolveReferences">
+    <Error Condition="!Exists('$(SIMHUB_INSTALL_PATH)\SimHub.Plugins.dll')"
+           Text="找不到 SimHub SDK。請將 SIMHUB_INSTALL_PATH 指向 SimHub 安裝目錄。" />
+  </Target>
+</Project>

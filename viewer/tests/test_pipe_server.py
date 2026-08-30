@@ -10,8 +10,11 @@ from contextlib import contextmanager
 import pytest
 
 from ffb_visualizer import pipe_server
+from ffb_visualizer.protocol import Frame
 
 from .support import frame_bytes
+
+_WARMUP_FRAMES = 128
 
 
 def test_non_windows_receiver_fails_closed(monkeypatch) -> None:
@@ -61,9 +64,9 @@ def _produce_frames(total: int) -> None:
 
     with _connect_writer() as writer:
         _write(writer, frame_bytes(message_type=1, sequence=0))
-        for _ in range(128):
-            _write(writer, frame_bytes(sequence=0))
-        for sequence in range(1, total + 1):
+        for sequence in range(1, _WARMUP_FRAMES + 1):
+            _write(writer, frame_bytes(sequence=sequence))
+        for sequence in range(_WARMUP_FRAMES + 1, _WARMUP_FRAMES + total + 1):
             timestamp = time.perf_counter_ns()
             _write(writer, frame_bytes(sequence=sequence, qpc_ticks=timestamp))
             # Keep the producer above the 1 kHz gate without creating an
@@ -76,8 +79,8 @@ def test_windows_pipe_accepts_fragmented_frames_and_reconnects() -> None:
     received: list[int] = []
     delivered = threading.Event()
 
-    def on_frame(value: object) -> None:
-        received.append(value.sequence)  # ty: ignore[unresolved-attribute]
+    def on_frame(value: Frame) -> None:
+        received.append(value.sequence)
         if received.count(2) and received.count(4):
             delivered.set()
 
@@ -141,12 +144,12 @@ def test_windows_pipe_rejects_unavailable_client_pid(monkeypatch) -> None:
 
 @pytest.mark.skipif(os.name != "nt", reason="uses the production Windows named pipe")
 def test_windows_pipe_rejects_truncated_frame_at_disconnect() -> None:
-    received: list[object] = []
+    received: list[Frame] = []
     hello_delivered = threading.Event()
 
-    def on_frame(value: object) -> None:
+    def on_frame(value: Frame) -> None:
         received.append(value)
-        if value.sequence == 1:  # ty: ignore[unresolved-attribute]
+        if value.sequence == 1:
             hello_delivered.set()
 
     server = pipe_server.PipeServer(on_frame)
@@ -163,6 +166,26 @@ def test_windows_pipe_rejects_truncated_frame_at_disconnect() -> None:
             time.sleep(0.01)
         assert server.errors >= 1
         assert [frame.sequence for frame in received] == [1]
+    finally:
+        server.stop()
+        assert not server._thread or not server._thread.is_alive()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="uses the production Windows named pipe")
+def test_windows_pipe_rejects_out_of_order_sequence() -> None:
+    received: list[int] = []
+    server = pipe_server.PipeServer(lambda frame: received.append(frame.sequence))
+    server.start()
+    try:
+        with _connect_writer() as writer:
+            _write(writer, frame_bytes(message_type=1, sequence=1))
+            _write(writer, frame_bytes(sequence=3))
+            _write(writer, frame_bytes(sequence=2))
+        deadline = time.monotonic() + 5.0
+        while server.errors == 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert server.errors >= 1
+        assert received == [1, 3]
     finally:
         server.stop()
         assert not server._thread or not server._thread.is_alive()
@@ -195,12 +218,14 @@ def test_windows_pipe_ingestion_p99_under_five_milliseconds_at_1000_events_per_s
     production_ticks: list[int] = []
     delivered = threading.Event()
 
-    def on_frame(value: object) -> None:
-        sequence = value.sequence  # ty: ignore[unresolved-attribute]
-        if 1 <= sequence <= total:
-            latencies_ns.append(time.perf_counter_ns() - value.qpc_ticks)  # ty: ignore[unresolved-attribute]
-            if sequence == 1 or sequence == total:
-                production_ticks.append(value.qpc_ticks)  # ty: ignore[unresolved-attribute]
+    def on_frame(value: Frame) -> None:
+        sequence = value.sequence
+        first_measured = _WARMUP_FRAMES + 1
+        last_measured = _WARMUP_FRAMES + total
+        if first_measured <= sequence <= last_measured:
+            latencies_ns.append(time.perf_counter_ns() - value.qpc_ticks)
+            if sequence == first_measured or sequence == last_measured:
+                production_ticks.append(value.qpc_ticks)
             if len(latencies_ns) == total:
                 delivered.set()
 

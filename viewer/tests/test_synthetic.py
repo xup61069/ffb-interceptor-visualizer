@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-only
 import time
 from dataclasses import replace
+from typing import cast
 
 from ffb_visualizer.model import EventStore, command_channel_value
 from ffb_visualizer.protocol import Condition, Frame
@@ -111,6 +112,7 @@ def test_selected_channel_and_user_marker_are_bounded_metadata() -> None:
     assert exported["producers"] == [{"process_id": 42, "name": "sample.exe"}]
     assert "C:\\Games" not in str(exported)
     assert exported["markers"] == [{"relative_seconds": 1.0, "label": "button press"}]
+    exported_events = cast(list[dict[str, object]], exported["events"])
     assert {
         "sample_period",
         "start_delay",
@@ -121,7 +123,7 @@ def test_selected_channel_and_user_marker_are_bounded_metadata() -> None:
         "envelope_fade_time",
         "property_id",
         "dropped",
-    }.issubset(exported["events"][0])
+    }.issubset(exported_events[0])
 
 
 def test_marker_export_tracks_rolling_window_origin() -> None:

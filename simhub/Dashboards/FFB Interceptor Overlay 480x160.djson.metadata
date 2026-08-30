@@ -1,0 +1,20 @@
+{
+  "ScreenCount": 1.0,
+  "InGameScreensIndexs": [0],
+  "IdleScreensIndexs": [0],
+  "MainPreviewIndex": 0,
+  "IsOverlay": true,
+  "ShowInTaskBar": true,
+  "Width": 480.0,
+  "Height": 160.0,
+  "OverlaySizeWarning": false,
+  "MetadataVersion": 2.0,
+  "EnableOnDashboardMessaging": true,
+  "PitScreensIndexs": [0],
+  "SimHubVersion": "9.11.22",
+  "Category": "Force Feedback",
+  "Title": "FFB Interceptor Overlay 480x160",
+  "Description": "High-contrast DirectInput command clipping overlay",
+  "Author": "FFB Interceptor contributors",
+  "DashboardVersion": "1.0.0"
+}

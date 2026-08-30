@@ -50,4 +50,38 @@ The public `master` branch is protected by the active `master-protection`
 ruleset. Changes must arrive through a pull request, cannot delete or
 force-update the branch, and must pass the eight CI/Security job checks
 (`proxy-x64`, `proxy-x86`, `viewer-py3.12`, `viewer-py3.13`, `codeql-cpp`,
-`codeql-python`, `dependency-audit` and `history-and-workflow-audit`).
+`codeql-python`, `dependency-audit` and `history-and-workflow-audit`). The
+additional `simhub-core-net48` CI job builds the detector and secure-pipe tests
+without proprietary SDK assemblies and validates both Dash Studio packages.
+
+The installable SimHub adapter is compiled locally against the SDK in an
+installed SimHub copy by `simhub/tools/Build-SimHubPackage.ps1`. That package
+contains only project-owned DLLs and dashboards; SimHub assemblies are never
+vendored or redistributed. Public release automation must not substitute a
+fake SDK reference assembly for the installable binary.
+
+After building that adapter and both proxy architectures locally,
+`simhub/tools/Build-ReadyToUsePackage.ps1` creates a portable ZIP. Its
+installer selects the game's architecture, makes recoverable backups, and
+tracks them for safe removal. The public release workflow does not currently
+create this ZIP because it intentionally has no installed SimHub SDK; a
+maintainer must build it against a real SimHub installation before publishing
+or attaching it to a release.
+
+The preferred no-game-DLL bundle is also a local SDK build. After both x86/x64
+`ffb_launcher` and `ffb_hook` targets exist,
+`simhub/tools/Build-LauncherPackage.ps1` creates
+`FFBInterceptor-Launcher-X.Y.Z.zip`. The builder copies an explicit allowlist,
+writes an internal SHA-256 manifest, creates a uniquely named partial archive,
+validates it, and only then atomically replaces the previous output. The tester
+rejects any extra, duplicate, escaping or non-canonical ZIP entry, requires the
+manifest to cover every file except itself, parses the scripts from the
+extracted archive, verifies that no `dinput8.dll` is present, and runs safe
+x86/x64 validation. In an administrator test context with SimHub closed it also
+executes an isolated fake-SimHub install, idempotent reinstall, tamper refusal,
+and rollback-backed uninstall/restoration lifecycle.
+
+The public release workflow intentionally does not build either SimHub bundle:
+GitHub-hosted CI has no installed proprietary SimHub SDK. A maintainer must use
+a real local SimHub installation, run the package tester, record the final
+SHA-256, and review the exact ZIP contents before attaching either bundle.
