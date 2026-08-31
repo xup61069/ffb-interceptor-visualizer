@@ -12,7 +12,7 @@
 
 ## 1. 執行摘要
 
-本次工作針對 FFB Interceptor v0.3.0 的不改遊戲 DLL 執行路徑、SimHub 削峰核心、安裝器寫入邊界，以及原生程式與 Release 供應鏈政策進行授權內驗證。x64 與 x86 原生測試各 7/7 通過，專案自行建置的離線 probe 也完整走過 Launcher、Hook、系統 DirectInput8、安全 Named Pipe 與 SimHub Core。削峰核心 43 項測試及 viewer 兩個 Python 矩陣各 26/26 項測試通過，最新 native line coverage 為 68.37%（1589/2324），managed line coverage 為 83.72%（1023/1222）；本輪 viewer 實測為 Python 3.12 的 86.63% 與 Python 3.13 的 86.20%。削峰結果採同一來源、同一裝置的效果絕對值保守加總，不跨來源或跨裝置相加，因此是 DirectInput 命令上界，不是方向盤馬達扭力。最終未簽章 Experimental SimHub／Launcher ZIP 已在 PowerShell 7 與 Windows PowerShell 5.1 完整通過 lifecycle、目的地、併發鎖與 fail-closed fixtures。原生 x86／x64 產物也通過靜態 CRT 與 System32-only 靜態匯入政策；Stable Manager marker、簽章憑證匯入／失敗清除與 Release 草稿續傳均有正反向驗證。GitHub 已啟用 immutable releases、v* tag 更新／刪除保護與 stable-signing environment，但尚未在本報告快照發布 v0.3.0。這些證據支持目前的程式、套件與發布前控制，不代表已具備公信 Authenticode 簽章、完整 Stable runner、第三方商業遊戲或實體高扭力方向盤驗證。
+本次工作針對 FFB Interceptor v0.3.0 的不改遊戲 DLL 執行路徑、SimHub 削峰核心、安裝器寫入邊界，以及原生程式與 Release 供應鏈政策進行授權內驗證。x64 與 x86 原生測試各 7/7 通過，專案自行建置的離線 probe 也完整走過 Launcher、Hook、系統 DirectInput8、安全 Named Pipe 與 SimHub Core。削峰核心 43 項測試及 viewer 兩個 Python 矩陣各 26/26 項測試通過；只收集 `ffb_*tests.exe`、只計入 `/src/` 與 `/launcher/manager_model.cpp` production source 的最新 native unit line coverage 為 65.02%（1091/1678），managed line coverage 為 83.72%（1023/1222）；本輪 viewer 實測為 Python 3.12 的 86.63% 與 Python 3.13 的 86.20%。Launcher／Hook 的 functional E2E 不混入 coverage，而是由 `proxy-x64`／`proxy-x86` 工作在 GitHub hosted runner 建立的一次性標準帳號下驗證。削峰結果採同一來源、同一裝置的效果絕對值保守加總，不跨來源或跨裝置相加，因此是 DirectInput 命令上界，不是方向盤馬達扭力。最終未簽章 Experimental SimHub／Launcher ZIP 已在 PowerShell 7 與 Windows PowerShell 5.1 完整通過 lifecycle、目的地、併發鎖與 fail-closed fixtures。原生 x86／x64 產物也通過靜態 CRT 與 System32-only 靜態匯入政策；Stable Manager marker、簽章憑證匯入／失敗清除與 Release 草稿續傳均有正反向驗證。GitHub 已啟用 immutable releases、v* tag 更新／刪除保護與 stable-signing environment，但尚未在本報告快照發布 v0.3.0。這些證據支持目前的程式、套件與發布前控制，不代表已具備公信 Authenticode 簽章、完整 Stable runner、第三方商業遊戲或實體高扭力方向盤驗證。
 
 ## 2. 授權與範圍
 
@@ -92,22 +92,23 @@ DependentLoadFlags 只保護 PE 靜態匯入，不會自動約束所有執行期
 - supersedes: none
 
 ### E-002
-- title: 削峰核心、viewer 與最新 coverage gates 通過
-- observed_at: 2026-08-31T05:07:28+08:00
+- title: 削峰核心、viewer 與 production unit coverage gates 通過
+- observed_at: 2026-08-31T18:06:31+08:00
 - source_type: command
-- source_ref: simhub/FFBInterceptor.Core.Tests；viewer/tests；build/v0.3-coverage-current
+- source_ref: simhub/FFBInterceptor.Core.Tests；viewer/tests；build/v0.3-ci-fix-coverage/native-unit-only.cobertura.xml
 - content_hash: n/a
 - artifact_path: n/a
 - repro_command: |
     simhub/FFBInterceptor.Core.Tests/bin/Release/net48/FFBInterceptor.Core.Tests.exe
-    ./.github/scripts/assert-cobertura-coverage.ps1 -Report build/v0.3-coverage-current/native-final.cobertura.xml -PathContains @('/src/','/launcher/') -RequireEachPath -MinimumPercent 50 -MinimumTrackedLines 900
+    ./.github/scripts/assert-cobertura-coverage.ps1 -Report build/v0.3-ci-fix-coverage/native-unit-only.cobertura.xml -PathContains @('/src/','/launcher/manager_model.cpp') -RequireEachPath -MinimumPercent 50 -MinimumTrackedLines 900
     ./.github/scripts/assert-cobertura-coverage.ps1 -Report build/v0.3-coverage-current/managed-final.cobertura.xml -PathContains '/simhub/FFBInterceptor.Core/' -MinimumPercent 75 -MinimumTrackedLines 500
     Push-Location viewer
     uv run pytest -s --cov=ffb_visualizer --cov-report=term-missing --cov-fail-under=85
     Pop-Location
 - raw_excerpt: |
     Core：43 項通過。
-    Native：68.37%（1589/2324 lines）。
+    Native production unit-only：65.02%（1091/1678 lines）；收集範圍只有 ffb_*tests.exe，coverage gate 只選 production source，不計 tests 目錄。
+    Launcher／Hook functional E2E 與 coverage 分流，由 proxy-x64／proxy-x86 在一次性標準帳號下執行。
     Managed Core：83.72%（1023/1222 lines）。
     Viewer：Python 3.12 與 3.13 各 26/26 項通過，本輪 coverage 分別為 86.63% 與 86.20%。
 - linked_workitem: WI-003
@@ -223,7 +224,7 @@ DependentLoadFlags 只保護 PE 靜態匯入，不會自動約束所有執行期
 - repro_steps:
   1. 執行 43 項 Core 測試。
   2. 執行 x64／x86 owned E2E，確認事件可由 producer 抵達 Core。
-  3. 對最新 native-final.cobertura.xml 與 managed-final.cobertura.xml 執行 coverage gates。
+  3. 對最新 native-unit-only.cobertura.xml 與 managed-final.cobertura.xml 執行 coverage gates；native 只收集 ffb_*tests.exe，並只選 `/src/` 與 `/launcher/manager_model.cpp` production source。
   4. 在 viewer 目錄執行 26 項 pytest 與 85% coverage 門檻。
 - remediation: 保留 protocol presence flags、來源／裝置／效果容量上限、trigger fail-closed、遺失／重連可靠度旗標與 coverage 門檻；文件持續明示命令上界不等於實際扭力。
 - optional_attack: ""
@@ -313,7 +314,7 @@ DependentLoadFlags 只保護 PE 靜態匯入，不會自動約束所有執行期
 
 下列命令由 G:\AICODE\FFB 執行。x64 與 x86 建置應分別使用對應的 Visual Studio Developer PowerShell。
 
-### 7.1 雙架構建置、CTest 與 owned E2E
+### 7.1 雙架構建置、CTest 與 functional E2E
 
     cmake --preset msvc-x64-release
     cmake --build --preset x64-release
@@ -324,21 +325,24 @@ DependentLoadFlags 只保護 PE 靜態匯入，不會自動約束所有執行期
     ctest --test-dir build/x86-release --output-on-failure
 
     dotnet build tests/e2e/FFBInterceptor.E2E.Tests.csproj -c Release
-    tests/e2e/bin/Release/net48/FFBInterceptor.E2E.Tests.exe build/x64-release/FFBInterceptor.Launcher.exe build/x64-release/e2e/FFBInterceptor.E2E.Probe.exe
-    tests/e2e/bin/Release/net48/FFBInterceptor.E2E.Tests.exe build/x86-release/FFBInterceptor.Launcher.exe build/x86-release/e2e/FFBInterceptor.E2E.Probe.exe
+    ./tests/powershell/run-e2e-as-standard-user.ps1 -E2ETest tests/e2e/bin/Release/net48/FFBInterceptor.E2E.Tests.exe -LauncherPath build/x64-release/FFBInterceptor.Launcher.exe -ProbePath build/x64-release/e2e/FFBInterceptor.E2E.Probe.exe
+    ./tests/powershell/run-e2e-as-standard-user.ps1 -E2ETest tests/e2e/bin/Release/net48/FFBInterceptor.E2E.Tests.exe -LauncherPath build/x86-release/FFBInterceptor.Launcher.exe -ProbePath build/x86-release/e2e/FFBInterceptor.E2E.Probe.exe
+
+CI 的 `proxy-x64`／`proxy-x86` 使用 GitHub hosted runner。由於該 runner 預設以系統管理員身分執行且停用 UAC，上述 helper 會建立一次性本機標準帳號、在該帳號下執行 owned functional E2E，最後刪除帳號與 staging；這項功能驗證不納入 coverage 報告。
 
 ### 7.2 Core、viewer 與 coverage
 
     dotnet build simhub/FFBInterceptor.Core.Tests/FFBInterceptor.Core.Tests.csproj -c Release
     simhub/FFBInterceptor.Core.Tests/bin/Release/net48/FFBInterceptor.Core.Tests.exe
 
-    $build = (Resolve-Path build/v0.3-coverage-current).Path
+    $build = (Resolve-Path build/v0.3-ci-fix-coverage).Path
     $suite = (Resolve-Path tests/powershell/run-native-coverage-suite.ps1).Path
-    $e2e = (Resolve-Path tests/e2e/bin/Release/net48/FFBInterceptor.E2E.Tests.exe).Path
-    $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $suite, '-BuildDirectory', $build, '-E2ETest', $e2e)
-    $include = @("$build\ffb_*tests.exe", "$build\FFBInterceptor.Launcher.exe", "$build\FFBInterceptor.Hook.dll", "$build\e2e\FFBInterceptor.E2E.Probe.exe")
-    ./.github/scripts/invoke-code-coverage.ps1 -CommandPath (Get-Command powershell.exe).Source -CommandArguments $arguments -IncludeFiles $include -Output build/v0.3-coverage-current/native-final.cobertura.xml
-    ./.github/scripts/assert-cobertura-coverage.ps1 -Report build/v0.3-coverage-current/native-final.cobertura.xml -PathContains @('/src/','/launcher/') -RequireEachPath -MinimumPercent 50 -MinimumTrackedLines 900
+    $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $suite, '-BuildDirectory', $build)
+    $include = @("$build\ffb_*tests.exe")
+    ./.github/scripts/invoke-code-coverage.ps1 -CommandPath (Get-Command powershell.exe).Source -CommandArguments $arguments -IncludeFiles $include -Output build/v0.3-ci-fix-coverage/native-unit-only.cobertura.xml
+    ./.github/scripts/assert-cobertura-coverage.ps1 -Report build/v0.3-ci-fix-coverage/native-unit-only.cobertura.xml -PathContains @('/src/','/launcher/manager_model.cpp') -RequireEachPath -MinimumPercent 50 -MinimumTrackedLines 900
+
+Native coverage 只收集 `ffb_*tests.exe`，再以 `/src/` 與 `/launcher/manager_model.cpp` 選出 production source，因此不把 test source 算進分母或分子。Launcher／Hook／Probe 的 functional E2E 由 7.1 的雙架構工作另行驗證。
 
     $test = (Resolve-Path simhub/FFBInterceptor.Core.Tests/bin/Release/net48/FFBInterceptor.Core.Tests.exe).Path
     $core = (Resolve-Path simhub/FFBInterceptor.Core.Tests/bin/Release/net48/FFBInterceptor.Core.dll).Path
@@ -404,13 +408,14 @@ DependentLoadFlags 只保護 PE 靜態匯入，不會自動約束所有執行期
 | 2026-08-30 21:20 | 完成雙架構 native 與 owned offline E2E | E-001：x64 7/7、x86 7/7、兩條 E2E 通過 |
 | 2026-08-30 21:23 | 完成原生載入政策與 Manager marker fixtures | E-003：static CRT、DependentLoadFlags、marker 正反向案例通過 |
 | 2026-08-30 21:28 | 完成 Core 行為測試 | E-002：Core 43 項通過 |
-| 2026-08-31 04:56 | 產生最新 native／managed coverage 報告並重跑 gates | E-002：native 68.37%（1589/2324）、managed 83.72%（1023/1222） |
+| 2026-08-31 04:56 | 產生 native／managed coverage 報告並重跑 gates | E-002：managed 83.72%（1023/1222） |
 | 2026-08-31 10:05 | 以 locked dev environment 重跑 viewer Python 3.12／3.13 | E-002：各 26/26 通過、coverage 86.63%／86.20% |
 | 2026-08-31 10:20 | 完成 repository_dispatch、draft recovery、Stable secret 隔離與憑證清除 hardening | E-005：PS7／PS5 fixtures、actionlint、zizmor 通過 |
 | 2026-08-31 10:43 | 用唯一暫存 code-signing PFX 驗證正常與匯入後失敗清除 | E-005：CurrentUser/My、private key、subject 與暫存 PFX 最終殘留 0 |
 | 2026-08-31 10:48 | 重建並驗證最終 Experimental SimHub／Launcher ZIP | E-004：PS7／PS5 套件 lifecycle 與目的地 fixtures 通過 |
 | 2026-08-31 11:08 | 修正 ZIP entry 時間／排序並在兩個全新目錄重建 | E-004：兩組 SimHub／Launcher ZIP SHA-256 分別完全相同 |
 | 2026-08-31 17:02 | 完成跨 PS5／PS7 stored ZIP、原子 publish、rollback 與競態複核後再次雙重重建 | E-004：final-r7／repro-r7 bytes 相同，PS7／PS5／Python／7-Zip 驗證通過 |
+| 2026-08-31 18:06 | 將 native unit coverage 與 functional E2E 分流後重新量測 | E-002：只收集 ffb_*tests.exe 並只選 production source，native 65.02%（1091/1678）；雙架構 E2E 改由一次性標準帳號執行 |
 
 ## 10. 結論
 

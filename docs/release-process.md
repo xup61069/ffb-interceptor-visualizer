@@ -51,9 +51,12 @@ commit SHA 查詢下列 11 個 check run；每一個都必須存在、完成且�
 11. `history-and-workflow-audit`
 
 預設最多等待 1,200 秒、每 15 秒查詢。任一 check 失敗、取消、逾時或缺少都會停止
-發行。`coverage-windows` 目前要求 native `/src/`＋`/launcher/` line coverage 至少
-50% 且至少 900 tracked lines（兩個路徑都必須出現），SimHub Core 至少 75% 且至少
-500 tracked lines；viewer pytest 另由 `viewer-py*` job 執行 85% 門檻。
+發行。`coverage-windows` 目前要求 native `/src/`＋`/launcher/manager_model.cpp` 的
+產品程式碼 line coverage 至少 50% 且至少 900 tracked lines（兩個路徑都必須出現），
+SimHub Core 至少 75% 且至少 500 tracked lines；viewer pytest 另由 `viewer-py*` job
+執行 85% 門檻。原生 coverage
+只量測可插樁的測試執行檔；正式 Launcher／Hook 的完整功能路徑由 `proxy-x64` 與
+`proxy-x86` 在一次性標準使用者帳號下另外執行，避免把提權繞過混進產品或 coverage。
 
 ## 路徑 A：GitHub-hosted 基礎 Experimental
 

@@ -102,9 +102,12 @@ v0.3.0 相容矩陣目前只有下列 profile（紀錄日期 2026-08-30）：
 
 - Windows x86／x64 CI 使用專案 fixture，走完
   Launcher → Hook → 系統 DirectInput8 → secure pipe → SimHub Core；測試先確認 fixture
-  目錄沒有 `dinput8.dll`。這不是硬體或商業遊戲測試。
-- Native `/src/`＋`/launcher/` line coverage 門檻 50%、至少 900 tracked lines，且兩個
-  路徑都要出現；SimHub Core 為 75%、至少 500 tracked lines；Python pytest 為 85%。
+  目錄沒有 `dinput8.dll`。GitHub Windows runner 本身是 UAC 關閉的管理員，因此 CI 會
+  在隔離暫存目錄用一次性標準使用者帳號執行正式 Launcher，完成後刪除帳號與暫存，
+  不會編入提權繞過。這不是硬體或商業遊戲測試。
+- Native `/src/`＋`/launcher/manager_model.cpp` 產品程式碼 line coverage 門檻 50%、
+  至少 900 tracked lines，且兩個路徑都要出現；SimHub Core 為 75%、至少 500
+  tracked lines；Python pytest 為 85%。
 - Hosted CI 另測 Python 3.12／3.13、dashboard／installer／release fixture、CodeQL、
   dependency audit、完整歷史 secret scan 與 workflow／SPDX 稽核。
 - `sbom.cdx.json`（CycloneDX 1.6）與 `sbom.spdx.json`（SPDX 2.3）包含 8 個第一方

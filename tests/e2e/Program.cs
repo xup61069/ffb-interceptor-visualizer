@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 using FFBInterceptor.Core;
 using System;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Threading;
 
 namespace FFBInterceptor.E2E.Tests
@@ -31,6 +34,7 @@ namespace FFBInterceptor.E2E.Tests
 
         private static void Run(string launcherPath, string probePath)
         {
+            RequireStandardUserToken();
             RequireFile(launcherPath);
             RequireFile(probePath);
             var hookPath = Path.Combine(Path.GetDirectoryName(launcherPath), "FFBInterceptor.Hook.dll");
@@ -74,21 +78,23 @@ namespace FFBInterceptor.E2E.Tests
                 NowMilliseconds))
             {
                 server.Start();
-                var launcher = LauncherProcess.Run(
-                    launcherPath,
-                    "--offline-only --game " + Quote(probePath) + " -- --hold-ms 5000",
-                    Path.GetDirectoryName(launcherPath),
-                    15000);
-                if (launcher.ExitCode != 0)
+                using (var launcher = Process.Start(new ProcessStartInfo
                 {
-                    throw new InvalidOperationException(
-                        "launcher exit " + launcher.ExitCode +
-                        (launcher.UsedLuaToken ? " (verified LUA token)" : string.Empty) +
-                        "\nstdout:\n" + launcher.StandardOutput +
-                        "\nstderr:\n" + launcher.StandardError);
+                    FileName = launcherPath,
+                    Arguments = "--offline-only --game " + Quote(probePath) + " -- --hold-ms 5000",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                }))
+                {
+                    if (launcher == null) throw new InvalidOperationException("launcher did not start");
+                    if (!launcher.WaitForExit(15000))
+                    {
+                        launcher.Kill();
+                        throw new TimeoutException("launcher timed out");
+                    }
+                    if (launcher.ExitCode != 0)
+                        throw new InvalidOperationException("launcher exit " + launcher.ExitCode);
                 }
-                if (launcher.UsedLuaToken)
-                    Console.WriteLine("INFO Launcher started with a verified LUA token");
 
                 if (!sourceObserved.Wait(8000)) throw new TimeoutException("producer Hello was not observed");
                 if (!deviceObserved.Wait(8000)) throw new TimeoutException("DeviceCreated was not observed");
@@ -121,6 +127,74 @@ namespace FFBInterceptor.E2E.Tests
         {
             if (!File.Exists(path)) throw new FileNotFoundException("required E2E file is missing", path);
         }
+
+        private static void RequireStandardUserToken()
+        {
+            string sid;
+            using (var identity = WindowsIdentity.GetCurrent())
+            {
+                sid = identity.User == null ? null : identity.User.Value;
+                if (string.IsNullOrWhiteSpace(sid))
+                    throw new InvalidOperationException("current Windows user SID is unavailable");
+                if (new WindowsPrincipal(identity).IsInRole(
+                        WindowsBuiltInRole.Administrator))
+                    throw new InvalidOperationException(
+                        "E2E must run outside the local Administrators group; SID=" + sid);
+            }
+
+            IntPtr token;
+            if (!OpenProcessToken(GetCurrentProcess(), TokenQuery, out token))
+                throw new Win32Exception(Marshal.GetLastWin32Error(),
+                    "OpenProcessToken failed");
+            try
+            {
+                TokenElevationInfo elevation;
+                int returnedLength;
+                if (!GetTokenInformation(token, TokenElevationClass, out elevation,
+                        Marshal.SizeOf(typeof(TokenElevationInfo)), out returnedLength))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(),
+                        "GetTokenInformation(TokenElevation) failed");
+                if (returnedLength < Marshal.SizeOf(typeof(TokenElevationInfo)))
+                    throw new InvalidOperationException("TokenElevation result was truncated");
+                if (elevation.TokenIsElevated != 0)
+                    throw new InvalidOperationException(
+                        "E2E must run with TokenElevation=0; SID=" + sid);
+            }
+            finally
+            {
+                CloseHandle(token);
+            }
+            Console.WriteLine("INFO standard-user token verified; SID=" + sid +
+                ", TokenElevation=0");
+        }
+
+        private const uint TokenQuery = 0x0008;
+        private const int TokenElevationClass = 20;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct TokenElevationInfo
+        {
+            public int TokenIsElevated;
+        }
+
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetCurrentProcess();
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool OpenProcessToken(
+            IntPtr processHandle, uint desiredAccess, out IntPtr tokenHandle);
+
+        [DllImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetTokenInformation(
+            IntPtr tokenHandle, int tokenInformationClass,
+            out TokenElevationInfo tokenInformation, int tokenInformationLength,
+            out int returnLength);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseHandle(IntPtr handle);
 
         private static string Quote(string value) { return "\"" + value.Replace("\"", "\\\"") + "\""; }
 

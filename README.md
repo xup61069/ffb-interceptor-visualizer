@@ -128,9 +128,12 @@ GitHub-hosted Windows CI 不需要 proprietary SimHub SDK，就能執行以下�
 - 專案自有的 `FFBInterceptor.E2E.Probe.exe` 透過真正的系統 DirectInput8，驗證
   **Launcher → Hook → DirectInput8 → current-user secure pipe → SimHub Core** 完整路徑；
   測試會先確認 fixture 目錄沒有 `dinput8.dll`。這是受控 fixture E2E，不是商業遊戲
-  或實體方向盤測試。
-- 原生 `/src/` 與 `/launcher/` 合併 line coverage 至少 50%，且至少追蹤 900 行，兩個
-  路徑都必須出現在報告；SimHub Core line coverage 至少 75%、追蹤至少 500 行；
+  或實體方向盤測試。由於 GitHub Windows runner 固定以關閉 UAC 的管理員執行，CI
+  會在隔離暫存目錄用一次性標準使用者帳號執行正式 Launcher，完成後刪除帳號與暫存；
+  不會為測試編入提權繞過。
+- 原生 `/src/` 與 `/launcher/manager_model.cpp` 的產品程式碼合併 line coverage 至少
+  50%，且至少追蹤 900 行，兩個路徑都必須出現在報告；SimHub Core line coverage
+  至少 75%、追蹤至少 500 行；
   Python viewer 的 pytest coverage 門檻為 85%。
 - Python 3.12／3.13 的 lint、型別與測試，以及 dashboard schema、安裝器 fixture、
   SDK／release gate fixture、CodeQL C++／C#／Python、dependency audit、完整歷史

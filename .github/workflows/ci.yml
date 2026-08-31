@@ -35,9 +35,10 @@ jobs:
         run: |
           dotnet build tests\e2e\FFBInterceptor.E2E.Tests.csproj -c Release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          & tests\e2e\bin\Release\net48\FFBInterceptor.E2E.Tests.exe `
-            "build\$env:BUILD_ARCH\FFBInterceptor.Launcher.exe" `
-            "build\$env:BUILD_ARCH\e2e\FFBInterceptor.E2E.Probe.exe"
+          & tests\powershell\run-e2e-as-standard-user.ps1 `
+            -E2ETest tests\e2e\bin\Release\net48\FFBInterceptor.E2E.Tests.exe `
+            -LauncherPath "build\$env:BUILD_ARCH\FFBInterceptor.Launcher.exe" `
+            -ProbePath "build\$env:BUILD_ARCH\e2e\FFBInterceptor.E2E.Probe.exe"
           exit $LASTEXITCODE
       - name: Reject app-local runtime dependency loading
         shell: pwsh
@@ -146,29 +147,21 @@ jobs:
           cmd.exe /d /c "call `"$devcmd`" -arch=x64 >nul && cmake -S . -B build\coverage -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo && cmake --build build\coverage --target all"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet build simhub\FFBInterceptor.Core.Tests\FFBInterceptor.Core.Tests.csproj -c Release
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet build tests\e2e\FFBInterceptor.E2E.Tests.csproj -c Release
           exit $LASTEXITCODE
       - name: Enforce native line coverage
         shell: pwsh
         run: |
           $build = (Resolve-Path -LiteralPath 'build\coverage').Path
           $suite = (Resolve-Path -LiteralPath 'tests\powershell\run-native-coverage-suite.ps1').Path
-          $e2e = (Resolve-Path -LiteralPath 'tests\e2e\bin\Release\net48\FFBInterceptor.E2E.Tests.exe').Path
-          $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $suite, '-BuildDirectory', $build, '-E2ETest', $e2e)
-          $include = @(
-            "$build\ffb_*tests.exe",
-            "$build\FFBInterceptor.Launcher.exe",
-            "$build\FFBInterceptor.Hook.dll",
-            "$build\e2e\FFBInterceptor.E2E.Probe.exe"
-          )
+          $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $suite, '-BuildDirectory', $build)
+          $include = @("$build\ffb_*tests.exe")
           .github\scripts\invoke-code-coverage.ps1 `
             -CommandPath (Get-Command powershell.exe).Source `
             -CommandArguments $arguments -IncludeFiles $include `
             -Output 'build\coverage\native.cobertura.xml'
           .github\scripts\assert-cobertura-coverage.ps1 `
             -Report 'build\coverage\native.cobertura.xml' `
-            -PathContains @('/src/', '/launcher/') -RequireEachPath `
+            -PathContains @('/src/', '/launcher/manager_model.cpp') -RequireEachPath `
             -MinimumPercent 50 -MinimumTrackedLines 900
       - name: Enforce SimHub core line coverage
         shell: pwsh
