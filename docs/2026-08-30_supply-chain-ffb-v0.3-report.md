@@ -12,7 +12,7 @@
 
 ## 1. 執行摘要
 
-本次工作針對 FFB Interceptor v0.3.0 的不改遊戲 DLL 執行路徑、SimHub 削峰核心、安裝器寫入邊界，以及原生程式與 Release 供應鏈政策進行授權內驗證。x64 與 x86 原生測試各 7/7 通過，專案自行建置的離線 probe 也完整走過 Launcher、Hook、系統 DirectInput8、安全 Named Pipe 與 SimHub Core。削峰核心 43 項測試及 viewer 兩個 Python 矩陣各 26/26 項測試通過；只收集 `ffb_*tests.exe`、只計入 `/src/` 與 `/launcher/manager_model.cpp` production source 的最新 native unit line coverage 為 65.02%（1091/1678），managed line coverage 為 83.72%（1023/1222）；本輪 viewer 實測為 Python 3.12 的 86.63% 與 Python 3.13 的 86.20%。Launcher／Hook 的 functional E2E 不混入 coverage，而是由 `proxy-x64`／`proxy-x86` 工作在 GitHub hosted runner 建立的一次性標準帳號下驗證。削峰結果採同一來源、同一裝置的效果絕對值保守加總，不跨來源或跨裝置相加，因此是 DirectInput 命令上界，不是方向盤馬達扭力。最終未簽章 Experimental SimHub／Launcher ZIP 已在 PowerShell 7 與 Windows PowerShell 5.1 完整通過 lifecycle、目的地、併發鎖與 fail-closed fixtures。原生 x86／x64 產物也通過靜態 CRT 與 System32-only 靜態匯入政策；Stable Manager marker、簽章憑證匯入／失敗清除與 Release 草稿續傳均有正反向驗證。GitHub 已啟用 immutable releases、v* tag 更新／刪除保護與 stable-signing environment，但尚未在本報告快照發布 v0.3.0。這些證據支持目前的程式、套件與發布前控制，不代表已具備公信 Authenticode 簽章、完整 Stable runner、第三方商業遊戲或實體高扭力方向盤驗證。
+本次工作針對 FFB Interceptor v0.3.0 的不改遊戲 DLL 執行路徑、SimHub 削峰核心、安裝器寫入邊界，以及原生程式與 Release 供應鏈政策進行授權內驗證。x64 與 x86 原生測試各 7/7 通過，專案自行建置的離線 probe 也完整走過 Launcher、Hook、系統 DirectInput8、安全 Named Pipe 與 SimHub Core。削峰核心 43 項測試及 viewer 兩個 Python 矩陣各 26/26 項測試通過；只收集 `ffb_*tests.exe`、只計入 `/src/` 與 `/launcher/manager_model.cpp` production source 的最新 native unit line coverage 為 65.06%（1093/1680），managed line coverage 為 83.72%（1023/1222）；本輪 viewer 實測為 Python 3.12 的 86.63% 與 Python 3.13 的 86.20%。Launcher／Hook 的 functional E2E 不混入 coverage，而是由 `proxy-x64`／`proxy-x86` 工作在 GitHub hosted runner 建立的一次性標準帳號下驗證。削峰結果採同一來源、同一裝置的效果絕對值保守加總，不跨來源或跨裝置相加，因此是 DirectInput 命令上界，不是方向盤馬達扭力。最終未簽章 Experimental SimHub／Launcher ZIP 已在 PowerShell 7 與 Windows PowerShell 5.1 完整通過 lifecycle、目的地、併發鎖與 fail-closed fixtures。原生 x86／x64 產物也通過靜態 CRT 與 System32-only 靜態匯入政策；Stable Manager marker、簽章憑證匯入／失敗清除與 Release 草稿續傳均有正反向驗證。GitHub 已啟用 immutable releases、v* tag 更新／刪除保護與 stable-signing environment，但尚未在本報告快照發布 v0.3.0。這些證據支持目前的程式、套件與發布前控制，不代表已具備公信 Authenticode 簽章、完整 Stable runner、第三方商業遊戲或實體高扭力方向盤驗證。
 
 ## 2. 授權與範圍
 
@@ -38,7 +38,7 @@
 
 1. 一般權限 Manager 先確認套件 manifest、必要檔案、SHA-256、reparse point、架構與建置政策，再依遊戲架構選擇固定的 x86 或 x64 Launcher／Hook。
 2. Launcher 只建立使用者明確選取的新遊戲子程序，不附加既有 PID；專案首選路徑不需要在遊戲資料夾建立、覆寫或刪除 dinput8.dll。
-3. 固定同層 Hook 載入 System32 的 dinput8.dll，並針對尚未被修改的 DirectInput8Create IAT 項目導入共用 wrapper。
+3. 固定同層 Hook 載入 System32 的 dinput8.dll，並針對尚未被修改、以函式名稱或 dinput8 ordinal 1 表示的 DirectInput8Create IAT 項目導入共用 wrapper；其他 ordinal 與已被改寫的指標都不處理。
 4. wrapper 將 DirectInput 命令事件送到目前使用者限定的本機 Named Pipe；SimHub Core 依來源、裝置與效果重建保守命令上界。
 5. Core 只在資料可靠時輸出削峰狀態；來源、裝置、效果或 trigger 狀態不完整時會標記限制，而不是默默產生確定結論。
 
@@ -51,6 +51,7 @@ E-001 的 owned offline E2E 實際走過第 2 至第 4 步，且 fixture 目錄�
 | MSVC runtime | 原生目標使用靜態 CRT，不依賴 app-local MSVCP、MSVCR、VCRUNTIME、CONCRT、UCRT 或 api-ms-win-crt DLL | E-003 的 x86／x64 dumpbin 檢查 |
 | 靜態 DLL 搜尋 | Proxy、Hook、Launcher 與 Manager 設定 DependentLoadFlags 0x800，將 PE 靜態匯入限制到 System32 搜尋範圍 | E-003 的八個產物檢查 |
 | DirectInput 載入 | Hook 明確以 LOAD_LIBRARY_SEARCH_SYSTEM32 載入 dinput8.dll | E-001 的 owned E2E 與 E-003 的匯入政策 |
+| DirectInput IAT | 只接受 DirectInput8Create 名稱或 dinput8 ordinal 1，且 live slot 必須仍等於已解析的 System32 原函式；Proxy import library 另命名為 FFBInterceptor.Proxy.lib，避免污染 E2E 的 Windows SDK dinput8.lib | E-001 的 x86／x64 正向、負向單元測試與名稱／ordinal E2E |
 | Stable marker | 唯一且 NUL 結尾，MODE 必須為 STABLE，signer 為 64 位大寫十六進位 SHA-256 | E-003 正反向 fixtures |
 | Marker 區段 | 完整落在 .rdata 的 raw 與 mapped VirtualSize 範圍；區段必須為 initialized-data／READ，且不得 WRITE／EXEC | E-003 正反向 fixtures |
 | 封裝重驗 | 封裝契約在簽章前解析 raw PE，簽章後重解析最終 bytes，再比對 marker signer 與 Authenticode signer | E-003 驗證 parser 與拒絕案例；本報告不宣稱已有公信發布簽章 |
@@ -65,7 +66,7 @@ DependentLoadFlags 只保護 PE 靜態匯入，不會自動約束所有執行期
 | 一般權限到提權作業 | 固定 Manager helper、固定安裝／移除動作、一次性同步事件與重新驗證 | 取消 UAC、錯誤 helper、缺少同步、SimHub 執行中或重驗失敗時停止 | 本次包含可觀察 handoff 與負向 fixture，但不包含真實 Program Files 完整 UAC 動態回歸 |
 | 同時安裝／解除安裝 | 固定名稱、零共享、delete-on-close mutation lease，加上本次作業 GUID sentinel | 第二個 process／session、可替換磁碟代號、reparse、目錄身分改變或不同 SimHub state path 即停止 | 受管理檔案以外的 SimHub 升級行為仍不由本專案控制 |
 | Manager 到遊戲程序 | 使用者選取的本機 EXE、相符架構的固定 Launcher／Hook | UNC、系統目錄、位元數或路徑政策不符時拒絕 | 商業遊戲、保護程序與下一層 launcher 未驗證 |
-| Hook 到系統 DirectInput8 | System32 dinput8.dll 與未被修改的 DirectInput8Create IAT | 解析或比對不安全時不覆寫該項目 | 動態解析、私有 loader、GameInput、XInput 與專有 FFB SDK 不涵蓋 |
+| Hook 到系統 DirectInput8 | System32 dinput8.dll，以及以函式名稱或 ordinal 1 表示且尚未被修改的 DirectInput8Create IAT | 其他 ordinal、指標已變或解析／比對不安全時不覆寫該項目 | 動態解析、私有 loader、GameInput、XInput 與專有 FFB SDK 不涵蓋 |
 | Producer 到 Core | 本機目前使用者 Named Pipe、協定版本、frame 上限與 Hello PID | frame、session、容量或 trigger 狀態異常時降級為不可靠 | 同一 Windows 使用者下的惡意程序不在完整信任邊界 |
 | 命令到實體硬體 | DirectInput 命令值 | 不做實體扭力安全判定 | 馬達電流、機構、驅動器限制與人體安全必須由硬體措施處理 |
 
@@ -73,41 +74,46 @@ DependentLoadFlags 只保護 PE 靜態匯入，不會自動約束所有執行期
 
 ### E-001
 - title: x64 與 x86 原生測試及 owned offline launcher pipeline 通過
-- observed_at: 2026-08-30T21:20:00+08:00
+- observed_at: 2026-08-31T22:10:00+08:00
 - source_type: command
-- source_ref: build/v0.3-final-x64；build/v0.3-final-x86；tests/e2e
+- source_ref: build/v0.3-ordinal-fix-x64；build/v0.3-ordinal-fix-x86；build/v0.3-final-x64；build/v0.3-final-x86；tests/e2e
 - content_hash: n/a
 - artifact_path: n/a
 - repro_command: |
-    ctest --test-dir build/v0.3-release-20260831-x64 -C Release --output-on-failure
-    ctest --test-dir build/v0.3-release-20260831-x86 -C Release --output-on-failure
-    tests/e2e/bin/Release/net48/FFBInterceptor.E2E.Tests.exe build/v0.3-release-20260831-x64/FFBInterceptor.Launcher.exe build/v0.3-release-20260831-x64/e2e/FFBInterceptor.E2E.Probe.exe
-    tests/e2e/bin/Release/net48/FFBInterceptor.E2E.Tests.exe build/v0.3-release-20260831-x86/FFBInterceptor.Launcher.exe build/v0.3-release-20260831-x86/e2e/FFBInterceptor.E2E.Probe.exe
+    ctest --test-dir build/v0.3-ordinal-fix-x64 --output-on-failure
+    ctest --test-dir build/v0.3-ordinal-fix-x86 --output-on-failure
+    tests/e2e/bin/Release/net48/FFBInterceptor.E2E.Tests.exe build/v0.3-ordinal-fix-x64/FFBInterceptor.Launcher.exe build/v0.3-ordinal-fix-x64/e2e/FFBInterceptor.E2E.Probe.exe
+    tests/e2e/bin/Release/net48/FFBInterceptor.E2E.Tests.exe build/v0.3-ordinal-fix-x86/FFBInterceptor.Launcher.exe build/v0.3-ordinal-fix-x86/e2e/FFBInterceptor.E2E.Probe.exe
+    tests/e2e/bin/Release/net48/FFBInterceptor.E2E.Tests.exe build/v0.3-final-x64/FFBInterceptor.Launcher.exe build/v0.3-final-x64/e2e/FFBInterceptor.E2E.Probe.exe
+    tests/e2e/bin/Release/net48/FFBInterceptor.E2E.Tests.exe build/v0.3-final-x86/FFBInterceptor.Launcher.exe build/v0.3-final-x86/e2e/FFBInterceptor.E2E.Probe.exe
 - raw_excerpt: |
     x64：7/7 CTest 通過。
     x86：7/7 CTest 通過。
-    兩個 owned fixture 都通過 Launcher → Hook → System DirectInput8 → secure pipe → SimHub Core。
+    全新 build 目錄只產生 FFBInterceptor.Proxy.lib，Probe 以 Windows SDK 的 DirectInput8Create 名稱匯入；雙架構 E2E 通過。
+    既有 ordinal 1 Probe 搭配更新後 Hook 的雙架構 E2E 亦通過。
+    IAT 單元測試確認 ordinal 1 可替換、ordinal 2 不替換，且 ordinal 1 的 live slot 若已被其他元件修改仍不覆寫。
+    兩組 owned fixture 都通過 Launcher → Hook → System DirectInput8 → secure pipe → SimHub Core。
     E2E 先確認 fixture 目錄不存在 dinput8.dll。
 - linked_workitem: WI-002
 - supersedes: none
 
 ### E-002
 - title: 削峰核心、viewer 與 production unit coverage gates 通過
-- observed_at: 2026-08-31T18:06:31+08:00
+- observed_at: 2026-08-31T22:16:00+08:00
 - source_type: command
-- source_ref: simhub/FFBInterceptor.Core.Tests；viewer/tests；build/v0.3-ci-fix-coverage/native-unit-only.cobertura.xml
+- source_ref: simhub/FFBInterceptor.Core.Tests；viewer/tests；build/coverage/native.cobertura.xml
 - content_hash: n/a
 - artifact_path: n/a
 - repro_command: |
     simhub/FFBInterceptor.Core.Tests/bin/Release/net48/FFBInterceptor.Core.Tests.exe
-    ./.github/scripts/assert-cobertura-coverage.ps1 -Report build/v0.3-ci-fix-coverage/native-unit-only.cobertura.xml -PathContains @('/src/','/launcher/manager_model.cpp') -RequireEachPath -MinimumPercent 50 -MinimumTrackedLines 900
+    ./.github/scripts/assert-cobertura-coverage.ps1 -Report build/coverage/native.cobertura.xml -PathContains @('/src/','/launcher/manager_model.cpp') -RequireEachPath -MinimumPercent 50 -MinimumTrackedLines 900
     ./.github/scripts/assert-cobertura-coverage.ps1 -Report build/v0.3-coverage-current/managed-final.cobertura.xml -PathContains '/simhub/FFBInterceptor.Core/' -MinimumPercent 75 -MinimumTrackedLines 500
     Push-Location viewer
     uv run pytest -s --cov=ffb_visualizer --cov-report=term-missing --cov-fail-under=85
     Pop-Location
 - raw_excerpt: |
     Core：43 項通過。
-    Native production unit-only：65.02%（1091/1678 lines）；收集範圍只有 ffb_*tests.exe，coverage gate 只選 production source，不計 tests 目錄。
+    Native production unit-only：65.06%（1093/1680 lines）；收集範圍只有 ffb_*tests.exe，coverage gate 只選 production source，不計 tests 目錄。
     Launcher／Hook functional E2E 與 coverage 分流，由 proxy-x64／proxy-x86 在一次性標準帳號下執行。
     Managed Core：83.72%（1023/1222 lines）。
     Viewer：Python 3.12 與 3.13 各 26/26 項通過，本輪 coverage 分別為 86.63% 與 86.20%。
@@ -201,15 +207,16 @@ DependentLoadFlags 只保護 PE 靜態匯入，不會自動約束所有執行期
 - category: design
 - status: validated
 - evidence_ids: [E-001, E-003]
-- location: launcher/injector.cpp:769；launcher/injector.cpp:812；src/hook_dll.cpp:51；src/iat_hook.cpp:116
+- location: launcher/injector.cpp；src/hook_dll.cpp；src/iat_hook.cpp；tests/cpp/iat_hook_tests.cpp；CMakeLists.txt
 - impact: 首選 Manager／Launcher 模式可在不寫入遊戲資料夾 dinput8.dll 的情況下建立新子程序、載入固定 Hook、使用系統 DirectInput8 並送出遙測，降低覆寫既有遊戲 proxy 的衝突與復原風險。
 - confidence: high
 - repro_steps:
   1. 在 x64 與 x86 build 目錄各執行完整 CTest。
   2. 以 tests/e2e 的 owner-built probe 分別執行兩個 Launcher E2E。
   3. 確認輸出顯示完整 Launcher → Hook → System DirectInput8 → secure pipe → Core，且 fixture 無 dinput8.dll。
-  4. 對兩個架構的 Hook／Launcher 執行 E-003 匯入政策檢查。
-- remediation: 保留雙架構 E2E、固定 sibling Hook、System32 DirectInput8 與無 dinput8.dll fixture 斷言作為必要回歸門檻。
+  4. 以名稱匯入 Probe 與 ordinal 1 Probe 各驗證雙架構路徑，並確認其他 ordinal／已改 live slot 不會被覆寫。
+  5. 對兩個架構的 Hook／Launcher 執行 E-003 匯入政策檢查，並確認建置目錄不會產生會遮蔽 Windows SDK 的 dinput8.lib。
+- remediation: 保留雙架構 E2E、名稱／ordinal IAT 正負向測試、固定 sibling Hook、System32 DirectInput8 與無 dinput8.dll fixture 斷言作為必要回歸門檻。
 - optional_attack: ""
 
 ### F-002
@@ -328,19 +335,19 @@ DependentLoadFlags 只保護 PE 靜態匯入，不會自動約束所有執行期
     ./tests/powershell/run-e2e-as-standard-user.ps1 -E2ETest tests/e2e/bin/Release/net48/FFBInterceptor.E2E.Tests.exe -LauncherPath build/x64-release/FFBInterceptor.Launcher.exe -ProbePath build/x64-release/e2e/FFBInterceptor.E2E.Probe.exe
     ./tests/powershell/run-e2e-as-standard-user.ps1 -E2ETest tests/e2e/bin/Release/net48/FFBInterceptor.E2E.Tests.exe -LauncherPath build/x86-release/FFBInterceptor.Launcher.exe -ProbePath build/x86-release/e2e/FFBInterceptor.E2E.Probe.exe
 
-CI 的 `proxy-x64`／`proxy-x86` 使用 GitHub hosted runner。由於該 runner 預設以系統管理員身分執行且停用 UAC，上述 helper 會建立一次性本機標準帳號、在該帳號下執行 owned functional E2E，最後刪除帳號與 staging；這項功能驗證不納入 coverage 報告。
+CI 的 `proxy-x64`／`proxy-x86` 使用 GitHub hosted runner。由於該 runner 預設以系統管理員身分執行且停用 UAC，上述 helper 會建立一次性本機標準帳號，只在測試期間把該 SID 加入目前 runner 的互動 window station／desktop ACL，在該帳號下執行 owned functional E2E。整段 ACL 作業以跨程序鎖序列化；還原前會確認目前 ACL 仍等於本次授權結果，若有其他更新就拒絕以舊 snapshot 覆寫。正常路徑最後先還原完整原始 ACL，再刪除帳號與 staging；這項功能驗證不納入 coverage 報告。
 
 ### 7.2 Core、viewer 與 coverage
 
     dotnet build simhub/FFBInterceptor.Core.Tests/FFBInterceptor.Core.Tests.csproj -c Release
     simhub/FFBInterceptor.Core.Tests/bin/Release/net48/FFBInterceptor.Core.Tests.exe
 
-    $build = (Resolve-Path build/v0.3-ci-fix-coverage).Path
+    $build = (Resolve-Path build/coverage).Path
     $suite = (Resolve-Path tests/powershell/run-native-coverage-suite.ps1).Path
     $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $suite, '-BuildDirectory', $build)
     $include = @("$build\ffb_*tests.exe")
-    ./.github/scripts/invoke-code-coverage.ps1 -CommandPath (Get-Command powershell.exe).Source -CommandArguments $arguments -IncludeFiles $include -Output build/v0.3-ci-fix-coverage/native-unit-only.cobertura.xml
-    ./.github/scripts/assert-cobertura-coverage.ps1 -Report build/v0.3-ci-fix-coverage/native-unit-only.cobertura.xml -PathContains @('/src/','/launcher/manager_model.cpp') -RequireEachPath -MinimumPercent 50 -MinimumTrackedLines 900
+    ./.github/scripts/invoke-code-coverage.ps1 -CommandPath (Get-Command powershell.exe).Source -CommandArguments $arguments -IncludeFiles $include -Output build/coverage/native.cobertura.xml
+    ./.github/scripts/assert-cobertura-coverage.ps1 -Report build/coverage/native.cobertura.xml -PathContains @('/src/','/launcher/manager_model.cpp') -RequireEachPath -MinimumPercent 50 -MinimumTrackedLines 900
 
 Native coverage 只收集 `ffb_*tests.exe`，再以 `/src/` 與 `/launcher/manager_model.cpp` 選出 production source，因此不把 test source 算進分母或分子。Launcher／Hook／Probe 的 functional E2E 由 7.1 的雙架構工作另行驗證。
 
@@ -415,7 +422,9 @@ Native coverage 只收集 `ffb_*tests.exe`，再以 `/src/` 與 `/launcher/manag
 | 2026-08-31 10:48 | 重建並驗證最終 Experimental SimHub／Launcher ZIP | E-004：PS7／PS5 套件 lifecycle 與目的地 fixtures 通過 |
 | 2026-08-31 11:08 | 修正 ZIP entry 時間／排序並在兩個全新目錄重建 | E-004：兩組 SimHub／Launcher ZIP SHA-256 分別完全相同 |
 | 2026-08-31 17:02 | 完成跨 PS5／PS7 stored ZIP、原子 publish、rollback 與競態複核後再次雙重重建 | E-004：final-r7／repro-r7 bytes 相同，PS7／PS5／Python／7-Zip 驗證通過 |
-| 2026-08-31 18:06 | 將 native unit coverage 與 functional E2E 分流後重新量測 | E-002：只收集 ffb_*tests.exe 並只選 production source，native 65.02%（1091/1678）；雙架構 E2E 改由一次性標準帳號執行 |
+| 2026-08-31 18:06 | 將 native unit coverage 與 functional E2E 分流後重新量測 | E-002：只收集 ffb_*tests.exe 並只選 production source；雙架構 E2E 改由一次性標準帳號執行 |
+| 2026-08-31 22:10 | 修正 DirectInput8 ordinal 1 遺漏與同名 import library 建置污染，加入互動桌面 ACL 受控授權 | E-001：全新 x86／x64 7/7、名稱與 ordinal 1 雙路徑 E2E、ordinal 正負向單元測試；ACL grant／restore、stale snapshot 拒絕與反向 unwind 全數通過 |
+| 2026-08-31 22:16 | 以最新產品程式重新建置並量測 native unit coverage | E-002：65.06%（1093/1680），兩個 production source 路徑與最低 tracked lines 門檻皆通過 |
 
 ## 10. 結論
 

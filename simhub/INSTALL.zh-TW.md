@@ -50,7 +50,8 @@ Manager 可保存多個遊戲設定檔並複製去識別化診斷；它不保存
 - 它依遊戲架構使用套件內固定的 `FFBInterceptor.Launcher.exe` 與
   `FFBInterceptor.Hook.dll`，不允許指定任意 DLL。
 - Hook 在新程序**記憶體**內替換尚未被其他元件修改的
-  `dinput8.dll!DirectInput8Create` IAT 指標；同步入口點的原位元組會在第一條遊戲指令前
+  `dinput8.dll!DirectInput8Create` IAT 指標；支援函式名稱與 `dinput8.dll` ordinal 1
+  兩種標準匯入表示，其他 ordinal 不會處理。同步入口點的原位元組會在第一條遊戲指令前
   還原，程序結束後記憶體變更自然消失。
 
 這保證的是不修改遊戲磁碟檔案，不代表程序記憶體完全不變。
@@ -223,8 +224,8 @@ producer 掉幀、同 session 重連或狀態容量超限也會停止削峰結�
 
 ## 支援範圍
 
-- 支援 x86／x64 Windows 遊戲，以及標準匯入
-  `dinput8.dll!DirectInput8Create` 的 DirectInput8 路徑。
+- 支援 x86／x64 Windows 遊戲，以及以函式名稱或 `dinput8.dll` ordinal 1 標準匯入
+  `DirectInput8Create` 的 DirectInput8 路徑。
 - `--offline-only` 是支援政策與使用者確認，不是防火牆，也不會替你斷網。
 - 不支援反作弊規避、隱匿、提權、任意程序注入、受保護遊戲或線上競技。
 - 使用 `GetProcAddress`、私有 loader、GameInput、XInput、WinRT、專有 FFB SDK，或由

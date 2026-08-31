@@ -14,13 +14,26 @@ namespace FFBInterceptor.E2E.Tests
     {
         private static int Main(string[] args)
         {
-            if (args.Length != 2)
-            {
-                Console.Error.WriteLine("usage: FFBInterceptor.E2E.Tests <launcher.exe> <probe.exe>");
-                return 2;
-            }
             try
             {
+                if (args.Length == 2 && string.Equals(
+                        args[0], "--grant-interactive-desktop", StringComparison.Ordinal))
+                {
+                    Console.WriteLine(InteractiveDesktopAcl.Grant(args[1]));
+                    return 0;
+                }
+                if (args.Length == 2 && string.Equals(
+                        args[0], "--restore-interactive-desktop", StringComparison.Ordinal))
+                {
+                    InteractiveDesktopAcl.Restore(args[1]);
+                    return 0;
+                }
+                if (args.Length != 2)
+                {
+                    Console.Error.WriteLine(
+                        "usage: FFBInterceptor.E2E.Tests <launcher.exe> <probe.exe>");
+                    return 2;
+                }
                 Run(Path.GetFullPath(args[0]), Path.GetFullPath(args[1]));
                 Console.WriteLine("PASS launcher -> hook -> DirectInput8 -> secure pipe -> SimHub core");
                 return 0;
@@ -96,7 +109,11 @@ namespace FFBInterceptor.E2E.Tests
                         throw new InvalidOperationException("launcher exit " + launcher.ExitCode);
                 }
 
-                if (!sourceObserved.Wait(8000)) throw new TimeoutException("producer Hello was not observed");
+                if (!sourceObserved.Wait(8000))
+                    throw new TimeoutException(
+                        "producer Hello was not observed; active=" +
+                        Volatile.Read(ref activeConnections) + ", protocolErrors=" +
+                        Volatile.Read(ref protocolErrors));
                 if (!deviceObserved.Wait(8000)) throw new TimeoutException("DeviceCreated was not observed");
                 if (identity == null || !string.Equals(identity.ProcessName, Path.GetFileName(probePath),
                     StringComparison.OrdinalIgnoreCase))

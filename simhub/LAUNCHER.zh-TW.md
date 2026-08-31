@@ -96,7 +96,8 @@ helper 會先重鎖、重驗整包，再用不繼承呼叫端 .NET startup／mod
   `FFBInterceptor.Hook.dll`。
 - Windows 載入器完成後，Launcher 會在遊戲入口點的**程序記憶體**暫放同步斷點，並在
   第一條遊戲指令執行前還原原位元組。
-- Hook 只替換尚未被其他元件修改的 `dinput8.dll!DirectInput8Create` IAT 指標；遊戲
+- Hook 只替換尚未被其他元件修改的 `dinput8.dll!DirectInput8Create` IAT 指標；支援
+  函式名稱與 `dinput8.dll` ordinal 1 兩種標準匯入表示，其他 ordinal 不會處理。遊戲
   結束後，程序內變更隨程序消失。
 
 所以這是「不修改遊戲磁碟檔案」，不是「程序記憶體完全不變」。若你改用傳統 proxy
@@ -153,8 +154,8 @@ v0.3.0 的支援矩陣目前只有 **SimHub 9.11.22 的一組精確 SDK 指紋**
 
 - `--offline-only` 是使用者確認與本專案支援政策，**不是防火牆，也不會替你斷網**。
 - 不支援反作弊規避、隱匿、提權、任意程序注入、受保護遊戲或線上競技。
-- 支援 x86／x64 Windows 程式，以及標準匯入
-  `dinput8.dll!DirectInput8Create` 的 DirectInput8 路徑。
+- 支援 x86／x64 Windows 程式，以及以函式名稱或 `dinput8.dll` ordinal 1 標準匯入
+  `DirectInput8Create` 的 DirectInput8 路徑。
 - 使用 `GetProcAddress`、私有 loader、GameInput、XInput、WinRT、專有 FFB SDK 的遊戲
   可能沒有資料；iRacing 明列為不支援。
 - 遊戲若先啟動另一個 launcher 再建立真正遊戲程序，目前不會自動追蹤下一層子程序。

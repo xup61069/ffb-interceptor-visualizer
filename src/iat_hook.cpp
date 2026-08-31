@@ -98,23 +98,28 @@ std::size_t patch_import_descriptor(std::uint8_t* base,
 
         const auto lookup = lookups[index].u1.Ordinal;
         if (lookup == 0) break;
-        if (IMAGE_SNAP_BY_ORDINAL(lookup)) continue;
-
-        const auto name_rva =
-            static_cast<std::size_t>(lookups[index].u1.AddressOfData);
-        if (!range_is_valid(image_size, name_rva,
-                            sizeof(IMAGE_IMPORT_BY_NAME))) {
-            continue;
-        }
-        const auto* import = reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(
-            base + name_rva);
-        const auto import_name_rva =
-            name_rva + offsetof(IMAGE_IMPORT_BY_NAME, Name);
-        if (import_name_rva >= image_size) continue;
-        if (!bounded_ascii_equal_ci(
-                reinterpret_cast<const char*>(import->Name),
-                image_size - import_name_rva, "DirectInput8Create")) {
-            continue;
+        if (IMAGE_SNAP_BY_ORDINAL(lookup)) {
+            // A dinput8 import library may encode DirectInput8Create as
+            // dinput8 ordinal 1.  The exact resolved system function pointer
+            // remains the final gate.
+            if (IMAGE_ORDINAL(lookup) != 1) continue;
+        } else {
+            const auto name_rva =
+                static_cast<std::size_t>(lookups[index].u1.AddressOfData);
+            if (!range_is_valid(image_size, name_rva,
+                                sizeof(IMAGE_IMPORT_BY_NAME))) {
+                continue;
+            }
+            const auto* import = reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(
+                base + name_rva);
+            const auto import_name_rva =
+                name_rva + offsetof(IMAGE_IMPORT_BY_NAME, Name);
+            if (import_name_rva >= image_size) continue;
+            if (!bounded_ascii_equal_ci(
+                    reinterpret_cast<const char*>(import->Name),
+                    image_size - import_name_rva, "DirectInput8Create")) {
+                continue;
+            }
         }
         if (patch_pointer(slot, original, replacement)) ++patched;
     }

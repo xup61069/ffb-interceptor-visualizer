@@ -130,7 +130,11 @@ GitHub-hosted Windows CI 不需要 proprietary SimHub SDK，就能執行以下�
   測試會先確認 fixture 目錄沒有 `dinput8.dll`。這是受控 fixture E2E，不是商業遊戲
   或實體方向盤測試。由於 GitHub Windows runner 固定以關閉 UAC 的管理員執行，CI
   會在隔離暫存目錄用一次性標準使用者帳號執行正式 Launcher，完成後刪除帳號與暫存；
-  不會為測試編入提權繞過。
+  測試期間只把該帳號 SID 暫時加入目前 runner 的互動 window station／desktop ACL，
+  結束時先確認 ACL 未被其他程序變更，再還原完整原始 ACL；若已變更就拒絕覆寫。
+  整段作業另以跨程序鎖序列化，再刪除帳號，不會為測試編入提權繞過。IAT 單元測試另
+  同時覆蓋 `DirectInput8Create` 的名稱匯入與 `dinput8.dll` ordinal 1 匯入，且不會覆寫
+  已被其他元件修改的 IAT 項目。
 - 原生 `/src/` 與 `/launcher/manager_model.cpp` 的產品程式碼合併 line coverage 至少
   50%，且至少追蹤 900 行，兩個路徑都必須出現在報告；SimHub Core line coverage
   至少 75%、追蹤至少 500 行；

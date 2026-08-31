@@ -104,7 +104,11 @@ v0.3.0 相容矩陣目前只有下列 profile（紀錄日期 2026-08-30）：
   Launcher → Hook → 系統 DirectInput8 → secure pipe → SimHub Core；測試先確認 fixture
   目錄沒有 `dinput8.dll`。GitHub Windows runner 本身是 UAC 關閉的管理員，因此 CI 會
   在隔離暫存目錄用一次性標準使用者帳號執行正式 Launcher，完成後刪除帳號與暫存，
-  不會編入提權繞過。這不是硬體或商業遊戲測試。
+  並在測試期間暫時把該帳號 SID 加入目前 runner 的互動 window station／desktop ACL；
+  整段作業以跨程序鎖序列化，結束時先確認 ACL 未被其他程序變更，再還原完整原始 ACL；
+  若已變更就拒絕覆寫。之後才刪除帳號，不會編入提權繞過。IAT 單元測試另覆蓋
+  `DirectInput8Create` 的名稱匯入與 `dinput8.dll` ordinal 1 匯入，並確認不覆寫已被其他
+  元件修改的 IAT 項目。這不是硬體或商業遊戲測試。
 - Native `/src/`＋`/launcher/manager_model.cpp` 產品程式碼 line coverage 門檻 50%、
   至少 900 tracked lines，且兩個路徑都要出現；SimHub Core 為 75%、至少 500
   tracked lines；Python pytest 為 85%。

@@ -60,6 +60,15 @@ add_library(dinput8 SHARED
     dinput8.def
 )
 
+# Keep the runtime proxy name dinput8.dll, but do not emit dinput8.lib beside
+# build targets.  MSVC resolves #pragma comment default libraries from the
+# build directory first; a same-named project import library would make the E2E
+# probe accidentally link against this proxy instead of the Windows SDK.
+set_target_properties(dinput8 PROPERTIES
+    OUTPUT_NAME "dinput8"
+    ARCHIVE_OUTPUT_NAME "FFBInterceptor.Proxy"
+)
+
 target_include_directories(dinput8 PRIVATE src)
 
 target_compile_definitions(dinput8 PRIVATE

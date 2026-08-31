@@ -79,6 +79,9 @@ $accountCreated = $false
 $child = $null
 $securePassword = $null
 $credential = $null
+$desktopAclBackup = $null
+$desktopAclMutex = $null
+$desktopAclMutexHeld = $false
 $primaryError = $null
 $cleanupErrors = [Collections.Generic.List[string]]::new()
 try {
@@ -103,6 +106,26 @@ try {
         throw "Could not create the ephemeral standard-user account (exit $LASTEXITCODE)."
     }
     $accountCreated = $true
+
+    $desktopAclMutex = [Threading.Mutex]::new(
+        $false, 'Local\FFBInterceptor.E2E.InteractiveDesktopAcl')
+    try {
+        $desktopAclMutexHeld = $desktopAclMutex.WaitOne(30000)
+    }
+    catch [Threading.AbandonedMutexException] {
+        $desktopAclMutexHeld = $true
+    }
+    if (-not $desktopAclMutexHeld) {
+        throw 'Timed out waiting for the interactive desktop ACL test lock.'
+    }
+
+    $accountSid = ([Security.Principal.NTAccount]::new($qualifiedAccount)).Translate(
+        [Security.Principal.SecurityIdentifier]).Value
+    $desktopAclBackup = (& $test --grant-interactive-desktop $accountSid |
+        Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($desktopAclBackup)) {
+        throw "Could not grant the ephemeral account interactive desktop access (exit $LASTEXITCODE)."
+    }
 
     $icacls = Join-Path ([Environment]::SystemDirectory) 'icacls.exe'
     & $icacls $staging /grant:r "${qualifiedAccount}:(OI)(CI)(RX)" /q | Out-Null
@@ -172,6 +195,36 @@ finally {
         catch {
             $cleanupErrors.Add("Could not dispose the E2E process handle: $($_.Exception.Message)")
         }
+    }
+    if ($null -ne $desktopAclBackup) {
+        try {
+            & $test --restore-interactive-desktop $desktopAclBackup | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                $cleanupErrors.Add(
+                    "Could not restore interactive desktop ACLs (exit $LASTEXITCODE).")
+            }
+        }
+        catch {
+            $cleanupErrors.Add(
+                "Could not restore interactive desktop ACLs: $($_.Exception.Message)")
+        }
+        $desktopAclBackup = $null
+    }
+    if ($desktopAclMutexHeld) {
+        try { $desktopAclMutex.ReleaseMutex() }
+        catch {
+            $cleanupErrors.Add(
+                "Could not release the interactive desktop ACL test lock: $($_.Exception.Message)")
+        }
+        $desktopAclMutexHeld = $false
+    }
+    if ($null -ne $desktopAclMutex) {
+        try { $desktopAclMutex.Dispose() }
+        catch {
+            $cleanupErrors.Add(
+                "Could not dispose the interactive desktop ACL test lock: $($_.Exception.Message)")
+        }
+        $desktopAclMutex = $null
     }
     $password = $null
     $securePassword = $null

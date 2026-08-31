@@ -56,7 +56,11 @@ commit SHA 查詢下列 11 個 check run；每一個都必須存在、完成且�
 SimHub Core 至少 75% 且至少 500 tracked lines；viewer pytest 另由 `viewer-py*` job
 執行 85% 門檻。原生 coverage
 只量測可插樁的測試執行檔；正式 Launcher／Hook 的完整功能路徑由 `proxy-x64` 與
-`proxy-x86` 在一次性標準使用者帳號下另外執行，避免把提權繞過混進產品或 coverage。
+`proxy-x86` 在一次性標準使用者帳號下另外執行。測試只在執行期間把該帳號 SID 加入
+目前 runner 的互動 window station／desktop ACL；整段作業以跨程序鎖序列化，還原前
+確認 ACL 仍等於本次授權結果，若已被其他程序變更就拒絕覆寫。正常路徑會還原完整原始
+ACL，再刪除帳號與 staging，避免把提權繞過混進產品或 coverage。IAT 測試同時覆蓋名稱匯入與
+`dinput8.dll` ordinal 1，且保留「目前指標仍是 System32 原函式」的覆寫門檻。
 
 ## 路徑 A：GitHub-hosted 基礎 Experimental
 
