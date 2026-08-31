@@ -3,6 +3,26 @@ using System;
 
 namespace FFBInterceptor.Core
 {
+    public enum EffectParameterPresence
+    {
+        // Protocol-v1 frames produced before presence flags were introduced.
+        Unknown = 0,
+        // CreateEffect was called without an initial DIEFFECT snapshot.
+        Absent = 1,
+        // CreateEffect supplied an initial DIEFFECT snapshot.
+        Present = 2,
+    }
+
+    [Flags]
+    public enum DetectorReliabilityIssue
+    {
+        None = 0,
+        FrameGap = 1,
+        SessionReconnect = 2,
+        TriggerStateUnavailable = 4,
+        StateCapacityExceeded = 8,
+    }
+
     public sealed class DetectorSettings
     {
         public double EntryThresholdPercent { get; set; } = 98.0;
@@ -161,6 +181,12 @@ namespace FFBInterceptor.Core
         public double CommandLevel { get; internal set; }
         public double PeakCommandLevel { get; internal set; }
         public double EffectiveCommandLevel { get; internal set; }
+        public double CombinedCommandLevel { get; internal set; }
+        public double UnclampedCombinedCommandLevel { get; internal set; }
+        public double CombinedEffectiveCommandLevel { get; internal set; }
+        public double PeakCombinedCommandLevel { get; internal set; }
+        public double PeakUnclampedCombinedCommandLevel { get; internal set; }
+        public double DetectionLevel { get; internal set; }
         public double EffectGain { get; internal set; }
         public double DeviceGain { get; internal set; }
         public bool AtLimit { get; internal set; }
@@ -171,12 +197,22 @@ namespace FFBInterceptor.Core
         public int RatioWindowMilliseconds { get; internal set; } = 1000;
         public int ActiveEffectCount { get; internal set; }
         public int UnsupportedEffectCount { get; internal set; }
+        public int UnobservedTriggerEffectCount { get; internal set; }
         public string LastEffectKind { get; internal set; } = "Unknown";
         public ulong DroppedFrames { get; internal set; }
         public ulong ProtocolErrors { get; internal set; }
+        public ulong SourceStateDrops { get; internal set; }
+        public ulong DeviceStateDrops { get; internal set; }
+        public ulong EffectStateDrops { get; internal set; }
+        public ulong StateCapacityDrops { get; internal set; }
+        public bool ModelLimited { get; internal set; }
+        public DetectorReliabilityIssue ReliabilityIssues { get; internal set; }
+        public string ReliabilityReason { get; internal set; } = "None";
+        public string AggregationModel { get; internal set; } = "ConservativeAbsoluteSumPerDevice";
         public string StatusText { get; internal set; } = "等待 DirectInput 遙測";
         public double EntryThreshold { get; internal set; } = 0.98;
         public double ExitThreshold { get; internal set; } = 0.95;
-        public string Definition { get; internal set; } = "DirectInput 命令削峰（非實際馬達扭力）";
+        public string Definition { get; internal set; } =
+            "DirectInput 命令削峰（同裝置多效果絕對值和的保守上界，非實際馬達扭力）";
     }
 }

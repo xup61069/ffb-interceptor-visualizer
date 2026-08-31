@@ -57,6 +57,7 @@ namespace FFBInterceptor.Core
     {
         public MessageType MessageType { get; internal set; }
         public uint Flags { get; internal set; }
+        public EffectParameterPresence EffectParameterPresence { get; internal set; }
         public ulong Sequence { get; internal set; }
         public ulong QpcTicks { get; internal set; }
         public uint ProcessId { get; internal set; }
@@ -70,7 +71,7 @@ namespace FFBInterceptor.Core
         public uint SamplePeriod { get; internal set; }
         public uint Gain { get; internal set; }
         public uint StartDelay { get; internal set; }
-        public uint TriggerButton { get; internal set; }
+        public uint TriggerButton { get; internal set; } = uint.MaxValue;
         public uint TriggerRepeat { get; internal set; }
         public uint Iterations { get; internal set; }
         public uint EnvelopeAttackLevel { get; internal set; }
@@ -110,6 +111,12 @@ namespace FFBInterceptor.Core
         public const int HeaderSize = 32;
         public const int MaximumFrameSize = 64 * 1024;
         public const int MaximumAxes = 8;
+        // These bits are meaningful only on EffectCreated. SetParameters
+        // continues to expose the caller's DIEP_* flags without reinterpretation.
+        public const uint EffectCreatedParametersAbsentFlag = 0x08000000;
+        public const uint EffectCreatedParametersPresentFlag = 0x10000000;
+        public const uint EffectCreatedParametersPresenceMask =
+            EffectCreatedParametersAbsentFlag | EffectCreatedParametersPresentFlag;
 
         public static ProtocolFrame Decode(byte[] data)
         {
@@ -129,10 +136,25 @@ namespace FFBInterceptor.Core
             if (frameSize < HeaderSize || frameSize > MaximumFrameSize || frameSize != data.Length)
                 throw new ProtocolException("invalid frame size");
 
+            var messageType = (MessageType)messageValue;
+            var flags = reader.ReadUInt32();
+            var parameterPresence = EffectParameterPresence.Unknown;
+            if (messageType == MessageType.EffectCreated)
+            {
+                var presenceFlags = flags & EffectCreatedParametersPresenceMask;
+                if (presenceFlags == EffectCreatedParametersAbsentFlag)
+                    parameterPresence = EffectParameterPresence.Absent;
+                else if (presenceFlags == EffectCreatedParametersPresentFlag)
+                    parameterPresence = EffectParameterPresence.Present;
+                else if (presenceFlags != 0)
+                    throw new ProtocolException("invalid effect parameter presence flags");
+            }
+
             var frame = new ProtocolFrame
             {
-                MessageType = (MessageType)messageValue,
-                Flags = reader.ReadUInt32(),
+                MessageType = messageType,
+                Flags = flags,
+                EffectParameterPresence = parameterPresence,
                 Sequence = reader.ReadUInt64(),
                 QpcTicks = reader.ReadUInt64(),
                 ProcessId = reader.ReadUInt32(),

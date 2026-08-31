@@ -12,9 +12,9 @@
   "EnableOnDashboardMessaging": true,
   "PitScreensIndexs": [0],
   "SimHubVersion": "9.11.22",
-  "Category": "Force Feedback",
+  "Category": "力回饋",
   "Title": "FFB Interceptor 800x480",
-  "Description": "DirectInput command clipping monitor",
+  "Description": "DirectInput 同裝置多效果保守合併命令削峰監測儀",
   "Author": "FFB Interceptor contributors",
-  "DashboardVersion": "1.0.0"
+  "DashboardVersion": "1.1.0"
 }

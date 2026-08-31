@@ -14,6 +14,16 @@ constexpr std::uint16_t kProtocolVersion = 1;
 constexpr std::uint32_t kMaxFrameSize = 64u * 1024u;
 constexpr std::size_t kMaxAxes = 8;
 
+// EffectCreated has no DirectInput call flags of its own, so protocol v1 can
+// use two otherwise-unused header bits to describe whether CreateEffect's
+// optional DIEFFECT pointer was supplied.  The meaning is deliberately
+// limited to EffectCreated; EffectParametersChanged keeps its DIEP_* flags
+// unchanged.
+constexpr std::uint32_t kEffectCreatedParametersAbsentFlag = 0x08000000u;
+constexpr std::uint32_t kEffectCreatedParametersPresentFlag = 0x10000000u;
+constexpr std::uint32_t kEffectCreatedParametersPresenceMask =
+    kEffectCreatedParametersAbsentFlag | kEffectCreatedParametersPresentFlag;
+
 enum class MessageType : std::uint16_t {
     Hello = 1,
     DeviceCreated = 2,
@@ -49,6 +59,14 @@ enum class EffectCommand : std::uint16_t {
     Release = 5,
 };
 
+enum class EffectParameterPresence : std::uint8_t {
+    // Legacy protocol-v1 producers emitted neither presence bit. Consumers
+    // retain their conservative legacy interpretation for those frames.
+    Unknown = 0,
+    Absent = 1,
+    Present = 2,
+};
+
 struct ConditionSample {
     std::int32_t offset = 0;
     std::int32_t positive_coefficient = 0;
@@ -63,6 +81,8 @@ struct ConditionSample {
 struct Event {
     MessageType type = MessageType::DropNotice;
     EffectKind effect_kind = EffectKind::Unknown;
+    EffectParameterPresence effect_parameter_presence =
+        EffectParameterPresence::Unknown;
     std::uint16_t command = 0;
     std::uint32_t flags = 0;
     std::uint64_t sequence = 0;

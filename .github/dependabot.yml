@@ -4,11 +4,15 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 5
   - package-ecosystem: pip
     directory: /viewer
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 7
     groups:
       python-dependencies:
         patterns: ["*"]

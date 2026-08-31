@@ -20,6 +20,7 @@ namespace FFBInterceptor.Core.Tests
             try
             {
                 Run("golden protocol fixture", GoldenProtocolFixture);
+                Run("effect parameter presence uses protocol-v1 flags", EffectParameterPresenceFlags);
                 Run("fragmented stream", FragmentedStream);
                 Run("malformed protocol rejected", MalformedProtocolRejected);
                 Run("invalid UTF-8 rejected", InvalidUtf8Rejected);
@@ -29,6 +30,19 @@ namespace FFBInterceptor.Core.Tests
                 Run("secure pipe rejects out-of-order sequence", SecurePipeRejectsOutOfOrderSequence);
                 Run("98 percent ratio trigger and hysteretic exit", RatioTriggerAndExit);
                 Run("gain does not hide command clipping", GainDoesNotHideClipping);
+                Run("same-device effects use a conservative absolute-sum bound", SameDeviceEffectsUseConservativeBound);
+                Run("different devices are not summed together", DifferentDevicesAreNotSummed);
+                Run("periodic waveforms use phase, period, and elapsed time", PeriodicWaveformsAreInstantaneous);
+                Run("periodic partial updates replace phase and period", PeriodicPartialUpdateChangesWave);
+                Run("ramp effect follows playback time", RampFollowsPlaybackTime);
+                Run("envelope attack and fade alter instantaneous amplitude", EnvelopeShapesAmplitude);
+                Run("triggered effects disclose unavailable button state", TriggerStateIsDisclosed);
+                Run("null-created partial effect remains reliable", NullCreatedPartialEffectRemainsReliable);
+                Run("zero-period waveform is reported unsupported", ZeroPeriodIsUnsupported);
+                Run("unsigned high-bit periodic duration stays supported", HighBitPeriodIsSupported);
+                Run("device state capacity is bounded and observable", DeviceStateCapacityIsBounded);
+                Run("effect state capacity is bounded and observable", EffectStateCapacityIsBounded);
+                Run("source state capacity is bounded and observable", SourceStateCapacityIsBounded);
                 Run("partial parameter updates preserve level", PartialUpdatePreservesLevel);
                 Run("condition effect is unsupported", ConditionIsUnsupported);
                 Run("manual source selection", ManualSourceSelection);
@@ -210,6 +224,326 @@ namespace FFBInterceptor.Core.Tests
             Near(1.0, snapshot.CommandLevel, 0.0001);
             Near(0.25, snapshot.EffectiveCommandLevel, 0.0001);
             True(snapshot.AtLimit);
+        }
+
+        private static void EffectParameterPresenceFlags()
+        {
+            var present = BaseFrame(MessageType.EffectCreated);
+            present.EffectParameterPresence = EffectParameterPresence.Present;
+            present.TriggerButton = 0;
+            var decodedPresent = ProtocolDecoder.Decode(EncodeFrame(present));
+            Equal(EffectParameterPresence.Present, decodedPresent.EffectParameterPresence);
+            Equal((uint)0, decodedPresent.TriggerButton);
+            Equal(ProtocolDecoder.EffectCreatedParametersPresentFlag,
+                  decodedPresent.Flags & ProtocolDecoder.EffectCreatedParametersPresenceMask);
+
+            var absent = BaseFrame(MessageType.EffectCreated);
+            absent.EffectParameterPresence = EffectParameterPresence.Absent;
+            absent.TriggerButton = 0;
+            var decodedAbsent = ProtocolDecoder.Decode(EncodeFrame(absent));
+            Equal(EffectParameterPresence.Absent, decodedAbsent.EffectParameterPresence);
+            Equal((uint)0, decodedAbsent.TriggerButton);
+
+            var legacy = BaseFrame(MessageType.EffectCreated);
+            legacy.EffectParameterPresence = EffectParameterPresence.Unknown;
+            var decodedLegacy = ProtocolDecoder.Decode(EncodeFrame(legacy));
+            Equal(EffectParameterPresence.Unknown, decodedLegacy.EffectParameterPresence);
+            Equal((uint)0, decodedLegacy.Flags & ProtocolDecoder.EffectCreatedParametersPresenceMask);
+
+            var changed = BaseFrame(MessageType.EffectParametersChanged);
+            changed.Flags = ProtocolDecoder.EffectCreatedParametersPresentFlag | 0x00000004;
+            var decodedChanged = ProtocolDecoder.Decode(EncodeFrame(changed));
+            Equal(EffectParameterPresence.Unknown, decodedChanged.EffectParameterPresence);
+            Equal(changed.Flags, decodedChanged.Flags);
+
+            var invalid = EncodeFrame(present);
+            invalid[15] |= (byte)(ProtocolDecoder.EffectCreatedParametersAbsentFlag >> 24);
+            Throws<ProtocolException>(() => ProtocolDecoder.Decode(invalid));
+        }
+
+        private static void SameDeviceEffectsUseConservativeBound()
+        {
+            var engine = ConnectedEngine(out var key);
+            var positive = ConstantCreated(6000, 5000);
+            positive.EffectId = 1;
+            var negative = ConstantCreated(-6000, 5000);
+            negative.EffectId = 2;
+            engine.ProcessFrame(key, positive, 0);
+            engine.ProcessFrame(key, StartFor(1), 0);
+            engine.ProcessFrame(key, negative, 0);
+            engine.ProcessFrame(key, StartFor(2), 0);
+
+            var snapshot = engine.Tick(0);
+            Near(0.6, snapshot.CommandLevel, 0.0001);
+            Near(0.3, snapshot.EffectiveCommandLevel, 0.0001);
+            Near(1.0, snapshot.CombinedCommandLevel, 0.0001);
+            Near(1.2, snapshot.UnclampedCombinedCommandLevel, 0.0001);
+            Near(1.2, snapshot.PeakUnclampedCombinedCommandLevel, 0.0001);
+            Near(0.6, snapshot.CombinedEffectiveCommandLevel, 0.0001);
+            Near(snapshot.CombinedCommandLevel, snapshot.DetectionLevel, 0.0001);
+            Equal("ConservativeAbsoluteSumPerDevice", snapshot.AggregationModel);
+            True(snapshot.AtLimit);
+        }
+
+        private static void DifferentDevicesAreNotSummed()
+        {
+            var engine = ConnectedEngine(out var key);
+            var first = ConstantCreated(6000, 10000);
+            first.DeviceId = 1;
+            first.EffectId = 1;
+            var second = ConstantCreated(6000, 10000);
+            second.DeviceId = 2;
+            second.EffectId = 1;
+            engine.ProcessFrame(key, first, 0);
+            engine.ProcessFrame(key, StartFor(1, 1), 0);
+            engine.ProcessFrame(key, second, 0);
+            engine.ProcessFrame(key, StartFor(1, 2), 0);
+
+            var snapshot = engine.Tick(0);
+            Near(0.6, snapshot.CommandLevel, 0.0001);
+            Near(0.6, snapshot.CombinedCommandLevel, 0.0001);
+            Near(0.6, snapshot.UnclampedCombinedCommandLevel, 0.0001);
+            False(snapshot.AtLimit);
+        }
+
+        private static void PeriodicWaveformsAreInstantaneous()
+        {
+            Near(0, PeriodicLevel(EffectKind.Sine, 0, 0, 0), 0.0001);
+            Near(1, PeriodicLevel(EffectKind.Sine, 25, 0, 0), 0.0001);
+            Near(1, PeriodicLevel(EffectKind.Sine, 0, 9000, 0), 0.0001);
+
+            Near(1, PeriodicLevel(EffectKind.Square, 0, 0, 2000, 8000), 0.0001);
+            Near(0.6, PeriodicLevel(EffectKind.Square, 50, 0, 2000, 8000), 0.0001);
+
+            Near(1, PeriodicLevel(EffectKind.Triangle, 0, 0, 0), 0.0001);
+            Near(0, PeriodicLevel(EffectKind.Triangle, 25, 0, 0), 0.0001);
+            Near(1, PeriodicLevel(EffectKind.Triangle, 50, 0, 0), 0.0001);
+
+            Near(0.6, PeriodicLevel(EffectKind.SawtoothUp, 0, 0, 2000, 8000), 0.0001);
+            Near(1, PeriodicLevel(EffectKind.SawtoothDown, 0, 0, 2000, 8000), 0.0001);
+            Near(0.2, PeriodicLevel(EffectKind.SawtoothUp, 25, 0, 2000, 8000), 0.0001);
+            Near(0.6, PeriodicLevel(EffectKind.SawtoothDown, 25, 0, 2000, 8000), 0.0001);
+        }
+
+        private static void PeriodicPartialUpdateChangesWave()
+        {
+            var engine = ConnectedEngine(out var key);
+            engine.ProcessFrame(key, PeriodicCreated(EffectKind.Sine), 0);
+            engine.ProcessFrame(key, Start(), 0);
+            Near(0, engine.Tick(0).CommandLevel, 0.0001);
+
+            var changed = BaseFrame(MessageType.EffectParametersChanged);
+            changed.EffectKind = EffectKind.Sine;
+            changed.Flags = 0x00000100;
+            changed.PeriodicMagnitude = 10000;
+            changed.PeriodicPhase = 9000;
+            changed.PeriodicPeriod = 200000;
+            engine.ProcessFrame(key, changed, 0);
+            Near(1, engine.Tick(0).CommandLevel, 0.0001);
+            Near(0, engine.Tick(50).CommandLevel, 0.0001);
+        }
+
+        private static void RampFollowsPlaybackTime()
+        {
+            var engine = ConnectedEngine(out var key);
+            var ramp = BaseFrame(MessageType.EffectCreated);
+            ramp.EffectKind = EffectKind.Ramp;
+            ramp.RampStart = -10000;
+            ramp.RampEnd = 10000;
+            ramp.Gain = 10000;
+            ramp.Duration = 100000;
+            engine.ProcessFrame(key, ramp, 0);
+            engine.ProcessFrame(key, Start(), 0);
+
+            Near(1, engine.Tick(0).CommandLevel, 0.0001);
+            Near(0.5, engine.Tick(25).CommandLevel, 0.0001);
+            Near(0, engine.Tick(50).CommandLevel, 0.0001);
+            Near(0.5, engine.Tick(75).CommandLevel, 0.0001);
+            Near(0, engine.Tick(100).CommandLevel, 0.0001);
+        }
+
+        private static void EnvelopeShapesAmplitude()
+        {
+            var engine = ConnectedEngine(out var key);
+            var effect = ConstantCreated(5000, 10000);
+            effect.Duration = 200000;
+            effect.EnvelopeAttackLevel = 0;
+            effect.EnvelopeAttackTime = 100000;
+            effect.EnvelopeFadeLevel = 0;
+            effect.EnvelopeFadeTime = 50000;
+            engine.ProcessFrame(key, effect, 0);
+            engine.ProcessFrame(key, Start(), 0);
+
+            Near(0, engine.Tick(0).CommandLevel, 0.0001);
+            Near(0.25, engine.Tick(50).CommandLevel, 0.0001);
+            Near(0.5, engine.Tick(100).CommandLevel, 0.0001);
+            Near(0.25, engine.Tick(175).CommandLevel, 0.0001);
+            Near(0, engine.Tick(200).CommandLevel, 0.0001);
+
+            var highAttackEngine = ConnectedEngine(out var highAttackKey);
+            var highAttack = ConstantCreated(5000, 10000);
+            highAttack.Duration = 200000;
+            highAttack.EnvelopeAttackLevel = 10000;
+            highAttack.EnvelopeAttackTime = 100000;
+            highAttackEngine.ProcessFrame(highAttackKey, highAttack, 0);
+            highAttackEngine.ProcessFrame(highAttackKey, Start(), 0);
+            Near(1, highAttackEngine.Tick(0).CommandLevel, 0.0001);
+            Near(0.75, highAttackEngine.Tick(50).CommandLevel, 0.0001);
+
+            var periodicEngine = ConnectedEngine(out var periodicKey);
+            var periodic = PeriodicCreated(EffectKind.Square, 0, 2000, 5000);
+            periodic.PeriodicPeriod = 200000;
+            periodic.EnvelopeAttackLevel = 0;
+            periodic.EnvelopeAttackTime = 100000;
+            periodicEngine.ProcessFrame(periodicKey, periodic, 0);
+            periodicEngine.ProcessFrame(periodicKey, Start(), 0);
+            Near(0.2, periodicEngine.Tick(0).CommandLevel, 0.0001);
+            Near(0.45, periodicEngine.Tick(50).CommandLevel, 0.0001);
+        }
+
+        private static void TriggerStateIsDisclosed()
+        {
+            var engine = ConnectedEngine(out var key);
+            var effect = ConstantCreated(10000, 10000);
+            engine.ProcessFrame(key, effect, 0);
+            engine.ProcessFrame(key, Start(), 0);
+            engine.Tick(0);
+            True(engine.Tick(50).IsClipping);
+
+            var triggered = BaseFrame(MessageType.EffectParametersChanged);
+            triggered.Flags = 0x00000008;
+            triggered.TriggerButton = 3;
+            engine.ProcessFrame(key, triggered, 60);
+
+            var limited = engine.Tick(60);
+            False(limited.DataReliable);
+            False(limited.AtLimit);
+            False(limited.IsClipping);
+            Near(1, limited.CommandLevel, 0.0001);
+            Equal(1, limited.UnobservedTriggerEffectCount);
+            True((limited.ReliabilityIssues & DetectorReliabilityIssue.TriggerStateUnavailable) != 0);
+            True(limited.StatusText.Contains("TriggerButton"));
+            var ended = 0;
+            DetectorTransition transition;
+            while (engine.TryDequeueTransition(out transition))
+                if (transition.Kind == DetectorTransitionKind.ClippingEnded) ended++;
+            Equal(1, ended);
+
+            var changed = BaseFrame(MessageType.EffectParametersChanged);
+            changed.Flags = 0x00000008;
+            changed.TriggerButton = uint.MaxValue;
+            engine.ProcessFrame(key, changed, 61);
+            var reliable = engine.Tick(61);
+            True(reliable.DataReliable);
+            Equal(0, reliable.UnobservedTriggerEffectCount);
+            True(reliable.AtLimit);
+        }
+
+        private static void NullCreatedPartialEffectRemainsReliable()
+        {
+            var engine = ConnectedEngine(out var key);
+            var created = BaseFrame(MessageType.EffectCreated);
+            created.EffectKind = EffectKind.Constant;
+            created.EffectParameterPresence = EffectParameterPresence.Absent;
+            // Zero is still present in the fixed payload, but the explicit
+            // Absent marker means it is not a real trigger-button value.
+            created.TriggerButton = 0;
+            engine.ProcessFrame(key, created, 0);
+
+            var changed = BaseFrame(MessageType.EffectParametersChanged);
+            changed.EffectKind = EffectKind.Constant;
+            changed.Flags = 0x00000100;
+            changed.Magnitude = 10000;
+            engine.ProcessFrame(key, changed, 0);
+            engine.ProcessFrame(key, Start(), 0);
+
+            var snapshot = engine.Tick(0);
+            True(snapshot.DataReliable);
+            Equal(0, snapshot.UnobservedTriggerEffectCount);
+            Near(1, snapshot.CommandLevel, 0.0001);
+
+            var buttonZeroEngine = ConnectedEngine(out var buttonZeroKey);
+            var buttonZero = ConstantCreated(10000, 10000);
+            buttonZero.EffectParameterPresence = EffectParameterPresence.Present;
+            buttonZero.TriggerButton = 0;
+            buttonZeroEngine.ProcessFrame(buttonZeroKey, buttonZero, 0);
+            buttonZeroEngine.ProcessFrame(buttonZeroKey, Start(), 0);
+            var limited = buttonZeroEngine.Tick(0);
+            False(limited.DataReliable);
+            Equal(1, limited.UnobservedTriggerEffectCount);
+        }
+
+        private static void ZeroPeriodIsUnsupported()
+        {
+            var engine = ConnectedEngine(out var key);
+            var effect = PeriodicCreated(EffectKind.Sine);
+            effect.PeriodicPeriod = 0;
+            engine.ProcessFrame(key, effect, 0);
+            engine.ProcessFrame(key, Start(), 0);
+            var snapshot = engine.Tick(0);
+            Equal(1, snapshot.ActiveEffectCount);
+            Equal(1, snapshot.UnsupportedEffectCount);
+            Near(0, snapshot.CommandLevel, 0.0001);
+            True(snapshot.ModelLimited);
+        }
+
+        private static void HighBitPeriodIsSupported()
+        {
+            var engine = ConnectedEngine(out var key);
+            var effect = PeriodicCreated(EffectKind.Square);
+            effect.PeriodicPeriod = unchecked((int)3000000000u);
+            engine.ProcessFrame(key, effect, 0);
+            engine.ProcessFrame(key, Start(), 0);
+            var snapshot = engine.Tick(0);
+            Equal(0, snapshot.UnsupportedEffectCount);
+            Near(1, snapshot.CommandLevel, 0.0001);
+        }
+
+        private static void DeviceStateCapacityIsBounded()
+        {
+            var engine = ConnectedEngine(out var key);
+            for (uint deviceId = 2; deviceId <= 80; deviceId++)
+            {
+                var frame = BaseFrame(MessageType.DeviceCreated);
+                frame.DeviceId = deviceId;
+                engine.ProcessFrame(key, frame, deviceId);
+            }
+            var snapshot = engine.Tick(100);
+            True(snapshot.DeviceStateDrops > 0);
+            True(snapshot.StateCapacityDrops >= snapshot.DeviceStateDrops);
+            False(snapshot.DataReliable);
+            True((snapshot.ReliabilityIssues & DetectorReliabilityIssue.StateCapacityExceeded) != 0);
+        }
+
+        private static void EffectStateCapacityIsBounded()
+        {
+            var engine = ConnectedEngine(out var key);
+            for (uint effectId = 1; effectId <= 1100; effectId++)
+            {
+                var frame = ConstantCreated(100, 10000);
+                frame.EffectId = effectId;
+                engine.ProcessFrame(key, frame, effectId);
+            }
+            var snapshot = engine.Tick(1200);
+            True(snapshot.EffectStateDrops > 0);
+            False(snapshot.DataReliable);
+            True(snapshot.StatusText.Contains("容量"));
+        }
+
+        private static void SourceStateCapacityIsBounded()
+        {
+            var engine = new ClippingEngine(DetectorSettings.Defaults());
+            for (uint processId = 1; processId <= 80; processId++)
+            {
+                var key = new SourceKey(processId, processId + "-capacity");
+                engine.Connect(new SourceIdentity(key, processId + ".exe", "test", 64),
+                               Guid.NewGuid(), processId);
+            }
+            var snapshot = engine.Tick(100);
+            Equal(64, snapshot.SourceCount);
+            True(snapshot.SourceStateDrops > 0);
+            False(snapshot.DataReliable);
+            True((snapshot.ReliabilityIssues & DetectorReliabilityIssue.StateCapacityExceeded) != 0);
         }
 
         private static void PartialUpdatePreservesLevel()
@@ -595,11 +929,43 @@ namespace FFBInterceptor.Core.Tests
             return frame;
         }
 
+        private static ProtocolFrame PeriodicCreated(
+            EffectKind kind, int phase = 0, int offset = 0, int magnitude = 10000)
+        {
+            var frame = BaseFrame(MessageType.EffectCreated);
+            frame.EffectKind = kind;
+            frame.PeriodicMagnitude = magnitude;
+            frame.PeriodicOffset = offset;
+            frame.PeriodicPhase = phase;
+            frame.PeriodicPeriod = 100000;
+            frame.Gain = 10000;
+            frame.Duration = uint.MaxValue;
+            return frame;
+        }
+
+        private static double PeriodicLevel(
+            EffectKind kind, double nowMilliseconds, int phase, int offset,
+            int magnitude = 10000)
+        {
+            var engine = ConnectedEngine(out var key);
+            engine.ProcessFrame(key, PeriodicCreated(kind, phase, offset, magnitude), 0);
+            engine.ProcessFrame(key, Start(), 0);
+            return engine.Tick(nowMilliseconds).CommandLevel;
+        }
+
         private static ProtocolFrame Start(uint iterations = 1)
         {
             var frame = BaseFrame(MessageType.EffectCommand);
             frame.EffectCommand = EffectCommand.Start;
             frame.Iterations = iterations;
+            return frame;
+        }
+
+        private static ProtocolFrame StartFor(uint effectId, uint deviceId = 1, uint iterations = 1)
+        {
+            var frame = Start(iterations);
+            frame.EffectId = effectId;
+            frame.DeviceId = deviceId;
             return frame;
         }
 
@@ -622,6 +988,9 @@ namespace FFBInterceptor.Core.Tests
             return new ProtocolFrame
             {
                 MessageType = type,
+                EffectParameterPresence = type == MessageType.EffectCreated
+                    ? EffectParameterPresence.Present
+                    : EffectParameterPresence.Unknown,
                 ProcessId = 1234,
                 DeviceId = 1,
                 EffectId = 7,
@@ -705,7 +1074,16 @@ namespace FFBInterceptor.Core.Tests
                 writer.Write(ProtocolDecoder.Version);
                 writer.Write((ushort)frame.MessageType);
                 writer.Write((uint)(ProtocolDecoder.HeaderSize + payload.Length));
-                writer.Write(frame.Flags);
+                var flags = frame.Flags;
+                if (frame.MessageType == MessageType.EffectCreated)
+                {
+                    flags &= ~ProtocolDecoder.EffectCreatedParametersPresenceMask;
+                    if (frame.EffectParameterPresence == EffectParameterPresence.Absent)
+                        flags |= ProtocolDecoder.EffectCreatedParametersAbsentFlag;
+                    else if (frame.EffectParameterPresence == EffectParameterPresence.Present)
+                        flags |= ProtocolDecoder.EffectCreatedParametersPresentFlag;
+                }
+                writer.Write(flags);
                 writer.Write(frame.Sequence);
                 writer.Write(frame.QpcTicks);
                 writer.Write(payload);

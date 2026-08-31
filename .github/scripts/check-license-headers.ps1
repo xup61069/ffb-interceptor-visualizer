@@ -25,7 +25,7 @@ $workspaceFiles = @(
 )
 $targets = @(
     $workspaceFiles | Where-Object {
-        $_ -match '^(src|tests/cpp|viewer/src|viewer/tests|simhub|\.github/scripts)/.*\.(cpp|h|cs|py|ps1)$' -or
+        $_ -match '^(src|tests/(?:cpp|e2e|powershell|python)|viewer/src|viewer/tests|simhub|\.github/scripts)/.*\.(cpp|h|cs|py|ps1)$' -or
         $_ -match '^viewer/[^/]+\.py$'
     }
     $workspaceFiles | Where-Object { $_ -in @('CMakeLists.txt', 'dinput8.def', 'viewer/pyproject.toml') }

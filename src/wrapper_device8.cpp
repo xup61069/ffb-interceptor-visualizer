@@ -8,6 +8,11 @@
 
 namespace {
 
+struct EffectCallbackContext {
+    LPDIENUMCREATEDEFFECTOBJECTSCALLBACK callback = nullptr;
+    LPVOID ref = nullptr;
+};
+
 void emit_effect(std::uint32_t device_id, std::uint32_t effect_id, REFGUID guid,
                  LPCDIEFFECT parameters, HRESULT hr) noexcept {
     ffb::Event event{};
@@ -18,6 +23,9 @@ void emit_effect(std::uint32_t device_id, std::uint32_t effect_id, REFGUID guid,
     event.effect_id = effect_id;
     event.effect_guid = guid;
     event.hresult = hr;
+    event.effect_parameter_presence = parameters
+        ? ffb::EffectParameterPresence::Present
+        : ffb::EffectParameterPresence::Absent;
     ffb::fill_effect_parameters(event, parameters);
     ffb::Telemetry::instance().emit(event);
 }
@@ -52,9 +60,27 @@ void emit_device_command(std::uint32_t device_id, DWORD command,
     ffb::Telemetry::instance().emit(event);
 }
 
+BOOL CALLBACK created_effect_callback(IDirectInputEffect* real, LPVOID opaque) {
+    auto* context = static_cast<EffectCallbackContext*>(opaque);
+    if (!context || !context->callback) return DIENUM_STOP;
+
+    WrapperEffect* wrapped = WrapperEffect::find_and_add_ref(real);
+    if (!wrapped) {
+        // Allocation/aggregation fail-open paths can legitimately have no
+        // wrapper. Preserve DirectInput behaviour instead of hiding an effect.
+        return context->callback(real, context->ref);
+    }
+    const BOOL result = context->callback(wrapped, context->ref);
+    wrapped->Release();
+    return result;
+}
+
 }  // namespace
 
 struct WrapperDevice8State {
+    static SRWLOCK registry_lock;
+    static WrapperDevice8State* registry_head;
+
     volatile LONG ref_count = 1;
     // DirectInput devices begin unacquired. This gate suppresses repeated
     // STOPALL telemetry while a backgrounded game polls and receives the
@@ -64,6 +90,9 @@ struct WrapperDevice8State {
     IDirectInputDevice8W* real_w = nullptr;
     WrapperDevice8A* wrapper_a = nullptr;
     WrapperDevice8W* wrapper_w = nullptr;
+    IUnknown* identity = nullptr;
+    WrapperDevice8State* registry_next = nullptr;
+    bool registered = false;
 
     bool valid() const noexcept {
         // A successful QI for the alternate A/W interface creates an
@@ -87,12 +116,27 @@ struct WrapperDevice8State {
         return static_cast<ULONG>(InterlockedIncrement(&ref_count));
     }
 
+    void unregister_locked() noexcept {
+        if (!registered) return;
+        WrapperDevice8State** link = &registry_head;
+        while (*link && *link != this) link = &((*link)->registry_next);
+        if (*link == this) *link = registry_next;
+        registry_next = nullptr;
+        registered = false;
+    }
+
     ULONG release() noexcept {
+        AcquireSRWLockExclusive(&registry_lock);
         const ULONG count = static_cast<ULONG>(InterlockedDecrement(&ref_count));
+        if (count == 0) unregister_locked();
+        ReleaseSRWLockExclusive(&registry_lock);
         if (count == 0) delete this;
         return count;
     }
 };
+
+SRWLOCK WrapperDevice8State::registry_lock = SRWLOCK_INIT;
+WrapperDevice8State* WrapperDevice8State::registry_head = nullptr;
 
 namespace {
 
@@ -135,6 +179,17 @@ WrapperDevice8<U>::WrapperDevice8(Base* real, std::uint32_t device_id)
                 WrapperDevice8W(m_state, m_state->real_w, device_id);
         }
     }
+
+    IUnknown* identity = nullptr;
+    if (real && SUCCEEDED(real->QueryInterface(
+                    IID_IUnknown, reinterpret_cast<void**>(&identity))) &&
+        identity) {
+        // The owned A/W interface references keep the COM object alive, so
+        // the canonical IUnknown pointer is a stable lookup key without
+        // retaining an extra reference.
+        m_state->identity = identity;
+        identity->Release();
+    }
 }
 
 template<bool U>
@@ -148,6 +203,68 @@ WrapperDevice8<U>::~WrapperDevice8() = default;
 template<bool U>
 bool WrapperDevice8<U>::valid() const noexcept {
     return m_state != nullptr && m_state->valid();
+}
+
+template<bool U>
+WrapperDevice8<U>* WrapperDevice8<U>::publish_or_add_ref(
+    Base* real, std::uint32_t device_id, bool* created) noexcept {
+    if (created) *created = false;
+    if (!real) return nullptr;
+
+    auto* candidate = new (std::nothrow) WrapperDevice8<U>(real, device_id);
+    if (!candidate || !candidate->valid()) {
+        if (candidate) candidate->discard_unpublished();
+        return nullptr;
+    }
+
+    WrapperDevice8State* candidate_state = candidate->m_state;
+    WrapperDevice8<U>* existing = nullptr;
+    bool identity_without_alias = false;
+
+    AcquireSRWLockExclusive(&WrapperDevice8State::registry_lock);
+    for (WrapperDevice8State* current = WrapperDevice8State::registry_head;
+         current; current = current->registry_next) {
+        const bool exact_pointer =
+            (current->real_a &&
+             static_cast<void*>(current->real_a) == static_cast<void*>(real)) ||
+            (current->real_w &&
+             static_cast<void*>(current->real_w) == static_cast<void*>(real));
+        const bool same_identity = candidate_state->identity &&
+                                   current->identity == candidate_state->identity;
+        if (!exact_pointer && !same_identity) continue;
+
+        if constexpr (U) {
+            existing = current->wrapper_w;
+        } else {
+            existing = current->wrapper_a;
+        }
+        if (existing) current->add_ref();
+        else identity_without_alias = true;
+        break;
+    }
+
+    if (!existing && !identity_without_alias) {
+        candidate_state->registry_next = WrapperDevice8State::registry_head;
+        WrapperDevice8State::registry_head = candidate_state;
+        candidate_state->registered = true;
+        if (created) *created = true;
+    }
+    ReleaseSRWLockExclusive(&WrapperDevice8State::registry_lock);
+
+    if (existing) {
+        // The existing shared state now owns the returned wrapper reference;
+        // destroy the unpublished candidate and its transferred real ref.
+        candidate->Release();
+        return existing;
+    }
+    if (identity_without_alias) {
+        // Never publish a second canonical IUnknown merely because a broken
+        // runtime failed the original A/W alias query. Preserve fail-open raw
+        // forwarding and leave ownership of `real` with the caller.
+        candidate->discard_unpublished();
+        return nullptr;
+    }
+    return candidate;
 }
 
 template<bool U>
@@ -302,7 +419,14 @@ HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::SendForceFeedbackCommand(DWORD flag
     return hr;
 }
 
-template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::EnumCreatedEffectObjects(LPDIENUMCREATEDEFFECTOBJECTSCALLBACK callback, LPVOID ref, DWORD flags) { return m_real->EnumCreatedEffectObjects(callback, ref, flags); }
+template<bool U>
+HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::EnumCreatedEffectObjects(
+    LPDIENUMCREATEDEFFECTOBJECTSCALLBACK callback, LPVOID ref, DWORD flags) {
+    if (!callback) return m_real->EnumCreatedEffectObjects(callback, ref, flags);
+    EffectCallbackContext context{callback, ref};
+    return m_real->EnumCreatedEffectObjects(&created_effect_callback, &context,
+                                            flags);
+}
 template<bool U> HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Escape(LPDIEFFESCAPE escape) { return m_real->Escape(escape); }
 template<bool U>
 HRESULT STDMETHODCALLTYPE WrapperDevice8<U>::Poll() {

@@ -163,6 +163,10 @@ namespace FFBInterceptor.SimHub
             this.AttachDelegate("SourceCount", () => CurrentSnapshot.SourceCount);
             this.AttachDelegate("ManualSourceAvailable", () => CurrentSnapshot.ManualSourceAvailable);
             this.AttachDelegate("SelectionMode", () => CurrentSnapshot.SelectionMode);
+            this.AttachDelegate("SelectionModeText", () =>
+                string.Equals(CurrentSnapshot.SelectionMode, "Manual", StringComparison.Ordinal)
+                    ? "手動來源"
+                    : "自動來源");
             this.AttachDelegate("SelectedProcessName", () => CurrentSnapshot.SelectedProcessName);
             this.AttachDelegate("SelectedProcessId", () => (double)CurrentSnapshot.SelectedProcessId);
             this.AttachDelegate("SelectedSessionId", () => CurrentSnapshot.SelectedSessionId);
@@ -172,6 +176,18 @@ namespace FFBInterceptor.SimHub
             this.AttachDelegate("CommandPercent", () => CurrentSnapshot.CommandLevel * 100.0);
             this.AttachDelegate("PeakCommandPercent", () => CurrentSnapshot.PeakCommandLevel * 100.0);
             this.AttachDelegate("EffectiveCommandPercent", () => CurrentSnapshot.EffectiveCommandLevel * 100.0);
+            this.AttachDelegate("CombinedCommandLevel", () => CurrentSnapshot.CombinedCommandLevel);
+            this.AttachDelegate("CombinedCommandPercent", () => CurrentSnapshot.CombinedCommandLevel * 100.0);
+            this.AttachDelegate("UnclampedCombinedCommandLevel", () => CurrentSnapshot.UnclampedCombinedCommandLevel);
+            this.AttachDelegate("UnclampedCombinedCommandPercent", () => CurrentSnapshot.UnclampedCombinedCommandLevel * 100.0);
+            this.AttachDelegate("CombinedEffectiveCommandLevel", () => CurrentSnapshot.CombinedEffectiveCommandLevel);
+            this.AttachDelegate("CombinedEffectiveCommandPercent", () => CurrentSnapshot.CombinedEffectiveCommandLevel * 100.0);
+            this.AttachDelegate("PeakCombinedCommandLevel", () => CurrentSnapshot.PeakCombinedCommandLevel);
+            this.AttachDelegate("PeakCombinedCommandPercent", () => CurrentSnapshot.PeakCombinedCommandLevel * 100.0);
+            this.AttachDelegate("PeakUnclampedCombinedCommandLevel", () => CurrentSnapshot.PeakUnclampedCombinedCommandLevel);
+            this.AttachDelegate("PeakUnclampedCombinedCommandPercent", () => CurrentSnapshot.PeakUnclampedCombinedCommandLevel * 100.0);
+            this.AttachDelegate("DetectionLevel", () => CurrentSnapshot.DetectionLevel);
+            this.AttachDelegate("DetectionPercent", () => CurrentSnapshot.DetectionLevel * 100.0);
             this.AttachDelegate("EffectGainPercent", () => CurrentSnapshot.EffectGain * 100.0);
             this.AttachDelegate("DeviceGainPercent", () => CurrentSnapshot.DeviceGain * 100.0);
             this.AttachDelegate("AtLimit", () => CurrentSnapshot.AtLimit);
@@ -185,22 +201,51 @@ namespace FFBInterceptor.SimHub
             this.AttachDelegate("RatioWindowMilliseconds", () => CurrentSnapshot.RatioWindowMilliseconds);
             this.AttachDelegate("ClipWindowText", () => string.Format(
                 CultureInfo.InvariantCulture,
-                "CLIP {0:0.###}S",
+                "削峰 {0:0.###} 秒",
                 CurrentSnapshot.RatioWindowMilliseconds / 1000.0));
             this.AttachDelegate("ActiveEffectCount", () => CurrentSnapshot.ActiveEffectCount);
             this.AttachDelegate("UnsupportedEffectCount", () => CurrentSnapshot.UnsupportedEffectCount);
+            this.AttachDelegate("UnobservedTriggerEffectCount", () => CurrentSnapshot.UnobservedTriggerEffectCount);
             this.AttachDelegate("LastEffectKind", () => CurrentSnapshot.LastEffectKind);
             this.AttachDelegate("DroppedFrames", () => (double)CurrentSnapshot.DroppedFrames);
             this.AttachDelegate("ProtocolErrors", () => (double)CurrentSnapshot.ProtocolErrors);
+            this.AttachDelegate("SourceStateDrops", () => (double)CurrentSnapshot.SourceStateDrops);
+            this.AttachDelegate("DeviceStateDrops", () => (double)CurrentSnapshot.DeviceStateDrops);
+            this.AttachDelegate("EffectStateDrops", () => (double)CurrentSnapshot.EffectStateDrops);
+            this.AttachDelegate("StateCapacityDrops", () => (double)CurrentSnapshot.StateCapacityDrops);
+            this.AttachDelegate("ModelLimited", () => CurrentSnapshot.ModelLimited);
+            this.AttachDelegate("ReliabilityIssues", () => CurrentSnapshot.ReliabilityIssues.ToString());
+            this.AttachDelegate("ReliabilityIssueMask", () => (double)(int)CurrentSnapshot.ReliabilityIssues);
+            this.AttachDelegate("ReliabilityReason", () => CurrentSnapshot.ReliabilityReason);
+            this.AttachDelegate("ReliabilityText", () => GetReliabilityText(CurrentSnapshot));
+            this.AttachDelegate("TriggerStateUnavailable", () =>
+                (CurrentSnapshot.ReliabilityIssues & DetectorReliabilityIssue.TriggerStateUnavailable) != 0);
+            this.AttachDelegate("StateCapacityExceeded", () =>
+                (CurrentSnapshot.ReliabilityIssues & DetectorReliabilityIssue.StateCapacityExceeded) != 0);
+            this.AttachDelegate("AggregationModel", () => CurrentSnapshot.AggregationModel);
+            this.AttachDelegate("AggregationText", () => "同裝置效果絕對值和（保守上界）");
             this.AttachDelegate("StatusText", () => CurrentSnapshot.StatusText);
             this.AttachDelegate("EntryThresholdPercent", () => CurrentSnapshot.EntryThreshold * 100.0);
             this.AttachDelegate("ExitThresholdPercent", () => CurrentSnapshot.ExitThreshold * 100.0);
             this.AttachDelegate("ThresholdText", () => string.Format(
                 CultureInfo.InvariantCulture,
-                "{0:0.#}% / {1:0.#}% HYSTERESIS",
+                "{0:0.#}% 進入 / {1:0.#}% 離開",
                 CurrentSnapshot.EntryThreshold * 100.0,
                 CurrentSnapshot.ExitThreshold * 100.0));
             this.AttachDelegate("Definition", () => CurrentSnapshot.Definition);
+        }
+
+        private static string GetReliabilityText(ClippingSnapshot snapshot)
+        {
+            var issues = snapshot.ReliabilityIssues;
+            if ((issues & (DetectorReliabilityIssue.FrameGap |
+                           DetectorReliabilityIssue.SessionReconnect)) != 0)
+                return "資料有缺口";
+            if ((issues & DetectorReliabilityIssue.StateCapacityExceeded) != 0)
+                return "狀態容量不足";
+            if ((issues & DetectorReliabilityIssue.TriggerStateUnavailable) != 0)
+                return "觸發狀態未知";
+            return snapshot.DataReliable ? "資料可靠" : "等待可靠資料";
         }
 
         private static ImageSource CreateMenuIcon()

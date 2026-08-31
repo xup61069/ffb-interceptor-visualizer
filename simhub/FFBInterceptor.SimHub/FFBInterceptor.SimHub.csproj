@@ -9,7 +9,7 @@
     <Deterministic>true</Deterministic>
     <AssemblyName>FFBInterceptor.SimHub</AssemblyName>
     <RootNamespace>FFBInterceptor.SimHub</RootNamespace>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <SIMHUB_INSTALL_PATH Condition="'$(SIMHUB_INSTALL_PATH)' == ''">C:\Program Files (x86)\SimHub</SIMHUB_INSTALL_PATH>
   </PropertyGroup>

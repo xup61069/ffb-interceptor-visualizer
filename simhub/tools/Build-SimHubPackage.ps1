@@ -3,7 +3,11 @@
 param(
     [string]$Configuration = 'Release',
     [string]$SimHubInstallPath = 'C:\Program Files (x86)\SimHub',
-    [string]$OutputDirectory = ''
+    [string]$SdkFingerprintPath = (Join-Path $PSScriptRoot '..\sdk-compatibility.json'),
+    [string]$OutputDirectory = '',
+    [string]$SigningCertificateThumbprint = $env:FFB_SIGNING_CERT_SHA1,
+    [string]$TimestampUrl = 'http://timestamp.digicert.com',
+    [switch]$RequireSigning
 )
 
 $ErrorActionPreference = 'Stop'
@@ -22,6 +26,12 @@ $packageVersion = [string]($pluginProject.Project.PropertyGroup.Version | Select
 if ($packageVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Plugin project has no stable SemVer Version.' }
 
 $env:SIMHUB_INSTALL_PATH = [System.IO.Path]::GetFullPath($SimHubInstallPath)
+$verifiedSimHubVersion = & (Join-Path $PSScriptRoot 'Test-SimHubSdk.ps1') `
+    -SimHubInstallPath $env:SIMHUB_INSTALL_PATH -FingerprintPath $SdkFingerprintPath
+if ([string]::IsNullOrWhiteSpace($verifiedSimHubVersion)) {
+    throw 'SimHub SDK fingerprint verification failed.'
+}
+Write-Host "Verified SimHub SDK profile $verifiedSimHubVersion"
 & dotnet build (Join-Path $simhubRoot 'FFBInterceptor.Core.Tests\FFBInterceptor.Core.Tests.csproj') -c $Configuration
 if ($LASTEXITCODE -ne 0) { throw 'Core test build failed.' }
 & (Join-Path $simhubRoot "FFBInterceptor.Core.Tests\bin\$Configuration\net48\FFBInterceptor.Core.Tests.exe")
@@ -45,20 +55,54 @@ try {
     $packageName = "FFBInterceptor-SimHub-$packageVersion"
     $packageRoot = Join-Path $temporaryRoot $packageName
     [System.IO.Directory]::CreateDirectory($packageRoot) | Out-Null
+    $pluginDirectory = Join-Path $packageRoot 'simhub'
+    $dashboardDirectory = Join-Path $packageRoot 'Dashboards'
+    $licenseDirectory = Join-Path $packageRoot 'licenses'
+    [System.IO.Directory]::CreateDirectory($pluginDirectory) | Out-Null
+    [System.IO.Directory]::CreateDirectory($dashboardDirectory) | Out-Null
+    [System.IO.Directory]::CreateDirectory($licenseDirectory) | Out-Null
     $pluginOutput = Join-Path $simhubRoot "FFBInterceptor.SimHub\bin\$Configuration\net48"
-    Copy-Item -LiteralPath (Join-Path $pluginOutput 'FFBInterceptor.SimHub.dll') -Destination $packageRoot
-    Copy-Item -LiteralPath (Join-Path $pluginOutput 'FFBInterceptor.Core.dll') -Destination $packageRoot
-    foreach ($pdbName in @('FFBInterceptor.SimHub.pdb', 'FFBInterceptor.Core.pdb')) {
-        $pdbPath = Join-Path $pluginOutput $pdbName
-        if (Test-Path -LiteralPath $pdbPath) { Copy-Item -LiteralPath $pdbPath -Destination $packageRoot }
+    Copy-Item -LiteralPath (Join-Path $pluginOutput 'FFBInterceptor.SimHub.dll') -Destination $pluginDirectory
+    Copy-Item -LiteralPath (Join-Path $pluginOutput 'FFBInterceptor.Core.dll') -Destination $pluginDirectory
+    foreach ($name in @(
+        'FFBInterceptor.Common.ps1',
+        'Install-SimHubPlugin.cmd',
+        'Install-SimHubPlugin.ps1',
+        'Uninstall-SimHubPlugin.cmd',
+        'Uninstall-SimHubPlugin.ps1'
+    )) {
+        Copy-Item -LiteralPath (Join-Path $simhubRoot "launcher-portable\$name") -Destination $packageRoot
     }
     Copy-Item -LiteralPath (Join-Path $simhubRoot 'INSTALL.zh-TW.md') -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $simhubRoot 'README.md') -Destination (Join-Path $packageRoot 'SIMHUB-README.md')
     Copy-Item -LiteralPath (Join-Path $repositoryRoot 'LICENSE') -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $repositoryRoot 'THIRD_PARTY_NOTICES.md') -Destination $packageRoot
-    Copy-Item -LiteralPath (Join-Path $repositoryRoot 'licenses\upstream-dcs-force-feedback-fix-MIT.txt') -Destination $packageRoot
-    Copy-Item -LiteralPath (Join-Path $resolvedOutput 'FFB Interceptor 800x480.simhubdash') -Destination $packageRoot
-    Copy-Item -LiteralPath (Join-Path $resolvedOutput 'FFB Interceptor Overlay 480x160.simhubdash') -Destination $packageRoot
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot 'licenses\upstream-dcs-force-feedback-fix-MIT.txt') -Destination $licenseDirectory
+    Copy-Item -LiteralPath (Join-Path $resolvedOutput 'FFB Interceptor 800x480.simhubdash') -Destination $dashboardDirectory
+    Copy-Item -LiteralPath (Join-Path $resolvedOutput 'FFB Interceptor Overlay 480x160.simhubdash') -Destination $dashboardDirectory
+
+    $signingTargets = @(
+        (Join-Path $pluginDirectory 'FFBInterceptor.SimHub.dll'),
+        (Join-Path $pluginDirectory 'FFBInterceptor.Core.dll'),
+        (Join-Path $packageRoot 'FFBInterceptor.Common.ps1'),
+        (Join-Path $packageRoot 'Install-SimHubPlugin.ps1'),
+        (Join-Path $packageRoot 'Uninstall-SimHubPlugin.ps1')
+    )
+    $signingArguments = @{
+        Paths = $signingTargets
+        CertificateThumbprint = $SigningCertificateThumbprint
+        TimestampUrl = $TimestampUrl
+    }
+    if ($RequireSigning) { $signingArguments.RequireSigning = $true }
+    & (Join-Path $repositoryRoot '.github\scripts\sign-windows-artifacts.ps1') @signingArguments
+
+    $manifestLines = @(Get-ChildItem -LiteralPath $packageRoot -Recurse -File |
+        Sort-Object FullName | ForEach-Object {
+            $relative = $_.FullName.Substring($packageRoot.Length + 1).Replace('\', '/')
+            "$(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256 | Select-Object -ExpandProperty Hash)  $relative"
+        })
+    [IO.File]::WriteAllLines((Join-Path $packageRoot 'SHA256SUMS.txt'),
+        $manifestLines, [Text.UTF8Encoding]::new($false))
 
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [System.IO.Path]::GetFullPath((Join-Path $resolvedOutput ($packageName + '.zip')))
@@ -74,7 +118,9 @@ try {
     $zip = [System.IO.Compression.ZipFile]::OpenRead($archive)
     try {
         $entryNames = @($zip.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
-        foreach ($required in @('FFBInterceptor.SimHub.dll', 'FFBInterceptor.Core.dll', 'LICENSE', 'THIRD_PARTY_NOTICES.md')) {
+        foreach ($required in @('simhub/FFBInterceptor.SimHub.dll', 'simhub/FFBInterceptor.Core.dll',
+            'Install-SimHubPlugin.ps1', 'Uninstall-SimHubPlugin.ps1', 'SHA256SUMS.txt',
+            'LICENSE', 'THIRD_PARTY_NOTICES.md')) {
             if (-not ($entryNames | Where-Object { $_.EndsWith('/' + $required, [StringComparison]::Ordinal) })) {
                 throw "Package is missing $required."
             }
@@ -84,6 +130,8 @@ try {
         }
     }
     finally { $zip.Dispose() }
+    & (Join-Path $PSScriptRoot 'Test-SimHubPackage.ps1') -PackagePath $archive
+    if ($LASTEXITCODE -ne 0) { throw 'SimHub package validation failed.' }
     Write-Host "Built $archive"
 }
 finally {

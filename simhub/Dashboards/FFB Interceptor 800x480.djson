@@ -58,7 +58,7 @@
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
           "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Normal", "FontSize": 14.0,
-          "Text": "等待 producer", "TextColor": "#FFABB5C0", "HorizontalAlignment": 2,
+          "Text": "等待遙測來源", "TextColor": "#FFABB5C0", "HorizontalAlignment": 2,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 30.0, "Left": 355.0, "Top": 31.0, "Visible": true, "Width": 421.0,
           "Name": "Source", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 32.0,
@@ -74,9 +74,9 @@
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
           "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "SemiBold", "FontSize": 13.0,
-          "Text": "DIRECTINPUT COMMAND", "TextColor": "#FF9FAAB6", "HorizontalAlignment": 0,
+          "Text": "DIRECTINPUT · 同裝置保守合併命令", "TextColor": "#FF9FAAB6", "HorizontalAlignment": 0,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
-          "Height": 22.0, "Left": 40.0, "Top": 93.0, "Visible": true, "Width": 220.0,
+          "Height": 22.0, "Left": 40.0, "Top": 93.0, "Visible": true, "Width": 450.0,
           "Name": "Command label", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0
         },
         {
@@ -89,7 +89,7 @@
           "Height": 26.0, "Left": 40.0, "Top": 128.0, "Visible": true, "Width": 575.0,
           "Name": "Command gauge", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 16.0,
           "Bindings": {
-            "Value": { "Formula": { "Expression": "[FFBInterceptor.CommandPercent]" }, "Mode": 2 },
+            "Value": { "Formula": { "Expression": "[FFBInterceptor.CombinedCommandPercent]" }, "Mode": 2 },
             "GaugeColor": {
               "Formula": { "Expression": "if([FFBInterceptor.Connected],if([FFBInterceptor.DataReliable],if([FFBInterceptor.IsClipping],1,if([FFBInterceptor.AtLimit],0.5,0)),0.5),0)" },
               "StartColor": "#FF64D3A3", "EnableMiddleColor": true, "MiddleColor": "#FFFFC107",
@@ -108,12 +108,12 @@
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
           "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "SemiBold", "FontSize": 11.0,
-          "Text": "98% ENTER", "TextColor": "#FFDDE3EA", "HorizontalAlignment": 2,
+          "Text": "98% 進入", "TextColor": "#FFDDE3EA", "HorizontalAlignment": 2,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 18.0, "Left": 520.0, "Top": 95.0, "Visible": true, "Width": 95.0,
           "Name": "Threshold label", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 100.0,
           "Bindings": {
-            "Text": { "FormatString": "0.0\\% ENTER", "Formula": { "Expression": "[FFBInterceptor.EntryThresholdPercent]" }, "Mode": 2 },
+            "Text": { "FormatString": "0.0\\% 進入", "Formula": { "Expression": "[FFBInterceptor.EntryThresholdPercent]" }, "Mode": 2 },
             "Left": { "Formula": { "Expression": "max(40,40 + 5.75 * [FFBInterceptor.EntryThresholdPercent] - 95)" }, "Mode": 2, "TargetPropertyName": "Left" }
           }
         },
@@ -124,7 +124,7 @@
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 50.0, "Left": 627.0, "Top": 109.0, "Visible": true, "Width": 130.0,
           "Name": "Command value", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 16.0,
-          "Bindings": { "Text": { "FormatString": "0.0\\%", "Formula": { "Expression": "[FFBInterceptor.CommandPercent]" }, "Mode": 2 } }
+          "Bindings": { "Text": { "FormatString": "0.0\\%", "Formula": { "Expression": "[FFBInterceptor.UnclampedCombinedCommandPercent]" }, "Mode": 2 } }
         },
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.RectangleItem, SimHub.Plugins",
@@ -144,19 +144,19 @@
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
           "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Bold", "FontSize": 31.0,
-          "Text": "HEADROOM", "TextColor": "#FFFFFFFF", "HorizontalAlignment": 1,
+          "Text": "有餘裕", "TextColor": "#FFFFFFFF", "HorizontalAlignment": 1,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 55.0, "Left": 36.0, "Top": 208.0, "Visible": true, "Width": 196.0,
           "Name": "State", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 16.0,
-          "Bindings": { "Text": { "Formula": { "Expression": "if([FFBInterceptor.Connected],if([FFBInterceptor.DataReliable],if([FFBInterceptor.IsClipping],'CLIP',if([FFBInterceptor.AtLimit],'LIMIT','HEADROOM')),'DATA GAP'),'WAIT')" }, "Mode": 2 } }
+          "Bindings": { "Text": { "Formula": { "Expression": "if([FFBInterceptor.Connected],if([FFBInterceptor.DataReliable],if([FFBInterceptor.IsClipping],'削峰',if([FFBInterceptor.AtLimit],'達上限','有餘裕')),'模型受限'),'等待')" }, "Mode": 2 } }
         },
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
           "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Normal", "FontSize": 12.0,
-          "Text": "98% / 95% HYSTERESIS", "TextColor": "#FFABB5C0", "HorizontalAlignment": 1,
+          "Text": "98% 進入 / 95% 離開", "TextColor": "#FFABB5C0", "HorizontalAlignment": 1,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 28.0, "Left": 36.0, "Top": 272.0, "Visible": true, "Width": 196.0,
-          "Name": "Hysteresis", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 100.0,
+          "Name": "遲滯門檻", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 100.0,
           "Bindings": { "Text": { "Formula": { "Expression": "[FFBInterceptor.ThresholdText]" }, "Mode": 2 } }
         },
         {
@@ -169,7 +169,7 @@
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
           "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "SemiBold", "FontSize": 13.0,
-          "Text": "CLIP · 1 SECOND", "TextColor": "#FF9FAAB6", "HorizontalAlignment": 1,
+          "Text": "削峰 · 1 秒", "TextColor": "#FF9FAAB6", "HorizontalAlignment": 1,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 25.0, "Left": 272.0, "Top": 207.0, "Visible": true, "Width": 136.0,
           "Name": "Ratio label", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 100.0,
@@ -194,7 +194,7 @@
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
           "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "SemiBold", "FontSize": 13.0,
-          "Text": "PEAK COMMAND", "TextColor": "#FF9FAAB6", "HorizontalAlignment": 1,
+          "Text": "合併命令峰值", "TextColor": "#FF9FAAB6", "HorizontalAlignment": 1,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 25.0, "Left": 448.0, "Top": 207.0, "Visible": true, "Width": 136.0,
           "Name": "Peak label", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0
@@ -206,7 +206,7 @@
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 55.0, "Left": 448.0, "Top": 241.0, "Visible": true, "Width": 136.0,
           "Name": "Peak value", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 32.0,
-          "Bindings": { "Text": { "FormatString": "0.0\\%", "Formula": { "Expression": "[FFBInterceptor.PeakCommandPercent]" }, "Mode": 2 } }
+          "Bindings": { "Text": { "FormatString": "0.0\\%", "Formula": { "Expression": "[FFBInterceptor.PeakUnclampedCombinedCommandPercent]" }, "Mode": 2 } }
         },
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.RectangleItem, SimHub.Plugins",
@@ -218,7 +218,7 @@
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
           "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "SemiBold", "FontSize": 13.0,
-          "Text": "AFTER GAINS", "TextColor": "#FF9FAAB6", "HorizontalAlignment": 1,
+          "Text": "增益後合併", "TextColor": "#FF9FAAB6", "HorizontalAlignment": 1,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 25.0, "Left": 624.0, "Top": 207.0, "Visible": true, "Width": 140.0,
           "Name": "Effective label", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0
@@ -230,7 +230,7 @@
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 55.0, "Left": 624.0, "Top": 241.0, "Visible": true, "Width": 140.0,
           "Name": "Effective value", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 32.0,
-          "Bindings": { "Text": { "FormatString": "0.0\\%", "Formula": { "Expression": "[FFBInterceptor.EffectiveCommandPercent]" }, "Mode": 2 } }
+          "Bindings": { "Text": { "FormatString": "0.0\\%", "Formula": { "Expression": "[FFBInterceptor.CombinedEffectiveCommandPercent]" }, "Mode": 2 } }
         },
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.RectangleItem, SimHub.Plugins",
@@ -241,62 +241,62 @@
         },
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
-          "IsTextItem": true, "Font": "Consolas", "FontWeight": "Normal", "FontSize": 15.0,
-          "Text": "EFFECT GAIN  100.0%", "TextColor": "#FFDCE2E8", "HorizontalAlignment": 0,
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Normal", "FontSize": 15.0,
+          "Text": "資料可靠", "TextColor": "#FFDCE2E8", "HorizontalAlignment": 0,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 28.0, "Left": 42.0, "Top": 345.0, "Visible": true, "Width": 220.0,
-          "Name": "Effect gain", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 32.0,
-          "Bindings": { "Text": { "FormatString": "EFFECT GAIN  0.0\\%", "Formula": { "Expression": "[FFBInterceptor.EffectGainPercent]" }, "Mode": 2 } }
+          "Name": "可靠性", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 32.0,
+          "Bindings": { "Text": { "Formula": { "Expression": "[FFBInterceptor.ReliabilityText]" }, "Mode": 2 } }
         },
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
-          "IsTextItem": true, "Font": "Consolas", "FontWeight": "Normal", "FontSize": 15.0,
-          "Text": "DEVICE GAIN  100.0%", "TextColor": "#FFDCE2E8", "HorizontalAlignment": 0,
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Normal", "FontSize": 13.0,
+          "Text": "同裝置效果絕對值和（保守上界）", "TextColor": "#FFDCE2E8", "HorizontalAlignment": 0,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
-          "Height": 28.0, "Left": 42.0, "Top": 385.0, "Visible": true, "Width": 220.0,
-          "Name": "Device gain", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 32.0,
-          "Bindings": { "Text": { "FormatString": "DEVICE GAIN  0.0\\%", "Formula": { "Expression": "[FFBInterceptor.DeviceGainPercent]" }, "Mode": 2 } }
+          "Height": 28.0, "Left": 42.0, "Top": 385.0, "Visible": true, "Width": 240.0,
+          "Name": "合併模型", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 32.0,
+          "Bindings": { "Text": { "Formula": { "Expression": "[FFBInterceptor.AggregationText]" }, "Mode": 2 } }
         },
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
-          "IsTextItem": true, "Font": "Consolas", "FontWeight": "Normal", "FontSize": 15.0,
-          "Text": "ACTIVE  0", "TextColor": "#FFDCE2E8", "HorizontalAlignment": 0,
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Normal", "FontSize": 15.0,
+          "Text": "作用中效果  0", "TextColor": "#FFDCE2E8", "HorizontalAlignment": 0,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 28.0, "Left": 292.0, "Top": 345.0, "Visible": true, "Width": 180.0,
-          "Name": "Active effects", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 32.0,
-          "Bindings": { "Text": { "FormatString": "ACTIVE  0", "Formula": { "Expression": "[FFBInterceptor.ActiveEffectCount]" }, "Mode": 2 } }
+          "Name": "作用中效果", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 32.0,
+          "Bindings": { "Text": { "FormatString": "作用中效果  0", "Formula": { "Expression": "[FFBInterceptor.ActiveEffectCount]" }, "Mode": 2 } }
         },
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
-          "IsTextItem": true, "Font": "Consolas", "FontWeight": "Normal", "FontSize": 15.0,
-          "Text": "UNSUPPORTED  0", "TextColor": "#FFDCE2E8", "HorizontalAlignment": 0,
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Normal", "FontSize": 15.0,
+          "Text": "觸發狀態未知  0", "TextColor": "#FFDCE2E8", "HorizontalAlignment": 0,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 28.0, "Left": 292.0, "Top": 385.0, "Visible": true, "Width": 200.0,
-          "Name": "Unsupported effects", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 32.0,
-          "Bindings": { "Text": { "FormatString": "UNSUPPORTED  0", "Formula": { "Expression": "[FFBInterceptor.UnsupportedEffectCount]" }, "Mode": 2 } }
+          "Name": "觸發狀態未知", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 32.0,
+          "Bindings": { "Text": { "FormatString": "觸發狀態未知  0", "Formula": { "Expression": "[FFBInterceptor.UnobservedTriggerEffectCount]" }, "Mode": 2 } }
         },
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
-          "IsTextItem": true, "Font": "Consolas", "FontWeight": "Normal", "FontSize": 15.0,
-          "Text": "DROPS  0", "TextColor": "#FFDCE2E8", "HorizontalAlignment": 0,
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Normal", "FontSize": 15.0,
+          "Text": "容量丟棄  0", "TextColor": "#FFDCE2E8", "HorizontalAlignment": 0,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 28.0, "Left": 520.0, "Top": 345.0, "Visible": true, "Width": 230.0,
-          "Name": "Drops", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 100.0,
-          "Bindings": { "Text": { "FormatString": "DROPS  0", "Formula": { "Expression": "[FFBInterceptor.DroppedFrames]" }, "Mode": 2 } }
+          "Name": "容量丟棄", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 100.0,
+          "Bindings": { "Text": { "FormatString": "容量丟棄  0", "Formula": { "Expression": "[FFBInterceptor.StateCapacityDrops]" }, "Mode": 2 } }
         },
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
-          "IsTextItem": true, "Font": "Consolas", "FontWeight": "Normal", "FontSize": 15.0,
-          "Text": "PROTOCOL ERRORS  0", "TextColor": "#FFDCE2E8", "HorizontalAlignment": 0,
+          "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Normal", "FontSize": 15.0,
+          "Text": "協定錯誤  0", "TextColor": "#FFDCE2E8", "HorizontalAlignment": 0,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 28.0, "Left": 520.0, "Top": 385.0, "Visible": true, "Width": 230.0,
-          "Name": "Protocol errors", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 100.0,
-          "Bindings": { "Text": { "FormatString": "PROTOCOL ERRORS  0", "Formula": { "Expression": "[FFBInterceptor.ProtocolErrors]" }, "Mode": 2 } }
+          "Name": "協定錯誤", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 100.0,
+          "Bindings": { "Text": { "FormatString": "協定錯誤  0", "Formula": { "Expression": "[FFBInterceptor.ProtocolErrors]" }, "Mode": 2 } }
         },
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
           "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Normal", "FontSize": 12.0,
-          "Text": "COMMAND SIGNAL · NOT PHYSICAL MOTOR TORQUE", "TextColor": "#FF7F8A96", "HorizontalAlignment": 0,
+          "Text": "同裝置效果絕對值和保守上界 · 非實際馬達扭力", "TextColor": "#FF7F8A96", "HorizontalAlignment": 0,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 26.0, "Left": 24.0, "Top": 445.0, "Visible": true, "Width": 500.0,
           "Name": "Definition", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0
@@ -304,11 +304,11 @@
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
           "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Normal", "FontSize": 12.0,
-          "Text": "AUTO", "TextColor": "#FF7F8A96", "HorizontalAlignment": 2,
+          "Text": "自動來源", "TextColor": "#FF7F8A96", "HorizontalAlignment": 2,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 26.0, "Left": 600.0, "Top": 445.0, "Visible": true, "Width": 176.0,
           "Name": "Selection mode", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 100.0,
-          "Bindings": { "Text": { "Formula": { "Expression": "[FFBInterceptor.SelectionMode]" }, "Mode": 2 } }
+          "Bindings": { "Text": { "Formula": { "Expression": "[FFBInterceptor.SelectionModeText]" }, "Mode": 2 } }
         }
       ],
       "MinimumRefreshIntervalMS": 0.0
@@ -327,9 +327,9 @@
     "ScreenCount": 1.0, "InGameScreensIndexs": [0], "IdleScreensIndexs": [0],
     "MainPreviewIndex": 0, "IsOverlay": false, "OverlaySizeWarning": false,
     "MetadataVersion": 2.0, "EnableOnDashboardMessaging": true, "PitScreensIndexs": [0],
-    "SimHubVersion": "9.11.22", "Category": "Force Feedback", "Title": "FFB Interceptor 800x480",
-    "Description": "DirectInput command clipping monitor", "Author": "FFB Interceptor contributors",
-    "Width": 800.0, "Height": 480.0, "DashboardVersion": "1.0.0"
+    "SimHubVersion": "9.11.22", "Category": "力回饋", "Title": "FFB Interceptor 800x480",
+    "Description": "DirectInput 同裝置多效果保守合併命令削峰監測儀", "Author": "FFB Interceptor contributors",
+    "Width": 800.0, "Height": 480.0, "DashboardVersion": "1.1.0"
   },
   "ShowOnScreenControls": true,
   "IsOverlay": false,

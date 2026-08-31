@@ -10,6 +10,24 @@
 
 namespace {
 
+template<bool U>
+using DeviceInstanceT =
+    std::conditional_t<U, DIDEVICEINSTANCEW, DIDEVICEINSTANCEA>;
+
+template<bool U>
+using DeviceInterfaceT =
+    std::conditional_t<U, IDirectInputDevice8W, IDirectInputDevice8A>;
+
+template<bool U>
+using SemanticsCallbackT = std::conditional_t<
+    U, LPDIENUMDEVICESBYSEMANTICSCBW, LPDIENUMDEVICESBYSEMANTICSCBA>;
+
+template<bool U>
+struct SemanticsCallbackContext {
+    SemanticsCallbackT<U> callback = nullptr;
+    LPVOID ref = nullptr;
+};
+
 std::string product_name(IDirectInputDevice8W* device) {
     DIDEVICEINSTANCEW info{};
     info.dwSize = sizeof(info);
@@ -64,6 +82,50 @@ void emit_device(std::uint32_t id, REFGUID guid, HRESULT hr,
     event.hresult = hr;
     ffb::copy_utf8_truncated(event.text, sizeof(event.text), name);
     ffb::Telemetry::instance().emit(event);
+}
+
+template<bool U>
+BOOL CALLBACK semantics_callback(const DeviceInstanceT<U>* instance,
+                                 DeviceInterfaceT<U>* real, DWORD flags,
+                                 DWORD remaining, LPVOID opaque) {
+    auto* context = static_cast<SemanticsCallbackContext<U>*>(opaque);
+    if (!context || !context->callback) return DIENUM_STOP;
+    if (!real) {
+        return context->callback(instance, nullptr, flags, remaining,
+                                 context->ref);
+    }
+
+    // EnumDevicesBySemantics lends the interface to the callback. Take one
+    // real reference for the wrapper's lifetime; the matching wrapper Release
+    // below drops it unless the application AddRefs the callback argument.
+    real->AddRef();
+    const std::uint32_t device_id =
+        ffb::Telemetry::instance().next_device_id();
+    const GUID guid = instance ? instance->guidInstance : GUID_NULL;
+    std::string name;
+    try {
+        name = product_name(real);
+    } catch (...) {
+        name.clear();
+    }
+
+    bool created = false;
+    auto* wrapped = WrapperDevice8<U>::publish_or_add_ref(
+        real, device_id, &created);
+    if (!wrapped) {
+        // Preserve fail-open behaviour if a control block or its A/W alias
+        // cannot be allocated. discard_unpublished returns ownership of our
+        // added reference, which is balanced before forwarding the raw value.
+        real->Release();
+        return context->callback(instance, real, flags, remaining,
+                                 context->ref);
+    }
+    if (created) emit_device(device_id, guid, DI_OK, name);
+
+    const BOOL result = context->callback(instance, wrapped, flags, remaining,
+                                          context->ref);
+    wrapped->Release();
+    return result;
 }
 
 }  // namespace
@@ -216,30 +278,31 @@ HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::CreateDevice(
     }
 
     const std::uint32_t device_id = ffb::Telemetry::instance().next_device_id();
+    std::string name;
     try {
         if (U) {
-            emit_device(device_id, rguid, hr, product_name(
-                reinterpret_cast<IDirectInputDevice8W*>(real)));
+            name = product_name(reinterpret_cast<IDirectInputDevice8W*>(real));
         } else {
-            emit_device(device_id, rguid, hr, product_name(
-                reinterpret_cast<IDirectInputDevice8A*>(real)));
+            name = product_name(reinterpret_cast<IDirectInputDevice8A*>(real));
         }
     } catch (...) {
         // Metadata is best-effort; allocation/encoding failures never alter
         // the DirectInput result or prevent the game from receiving a device.
-        emit_device(device_id, rguid, hr, {});
+        name.clear();
     }
-    auto* wrapped = new (std::nothrow) WrapperDevice8<U>(real, device_id);
+    bool created = false;
+    auto* wrapped = WrapperDevice8<U>::publish_or_add_ref(
+        real, device_id, &created);
     // WrapperDevice8 allocates a shared A/W control block.  If that
     // allocation fails, returning the partially constructed wrapper would
     // turn an otherwise valid DirectInput device into a broken COM object.
     // Preserve fail-open semantics by discarding it and returning the exact
     // real interface the system DLL supplied.
     if (!wrapped || !wrapped->valid()) {
-        if (wrapped) wrapped->discard_unpublished();
         *out_device = real;
         return hr;
     }
+    if (created) emit_device(device_id, rguid, hr, name);
     *out_device = wrapped;
     return hr;
 }
@@ -274,7 +337,13 @@ HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::FindDevice(REFGUID guid, const
 template<bool U>
 HRESULT STDMETHODCALLTYPE WrapperDirectInput8<U>::EnumDevicesBySemantics(
     const Char* user, ActFmtT* format, EnumSemCbT callback, LPVOID ref, DWORD flags) {
-    return m_real->EnumDevicesBySemantics(user, format, callback, ref, flags);
+    if (!callback) {
+        return m_real->EnumDevicesBySemantics(user, format, callback, ref,
+                                              flags);
+    }
+    SemanticsCallbackContext<U> context{callback, ref};
+    return m_real->EnumDevicesBySemantics(
+        user, format, &semantics_callback<U>, &context, flags);
 }
 
 template<bool U>

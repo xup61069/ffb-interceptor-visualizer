@@ -1,0 +1,69 @@
+flowchart LR
+  user["使用者（一般權限）"]
+
+  subgraph package["已解壓縮的 Launcher 套件"]
+    manager["Manager.exe"]
+    verify["精確清單、SHA-256、reparse、架構與簽章政策"]
+    lock["唯讀鎖持續到操作結束"]
+    broker["同一個 Manager 的受控提權 helper"]
+    ps["System32 Windows PowerShell<br/>最小化 Unicode 環境"]
+    installer["固定安裝／解除安裝腳本"]
+    launcher["架構相符的 Launcher"]
+    hook["固定同層 Hook DLL"]
+  end
+
+  subgraph runtime["一般權限遊戲與本機遙測"]
+    game["使用者選取的新遊戲子程序"]
+    dinput["System32 DirectInput8"]
+    pipe["目前使用者限定的 Named Pipe"]
+    core["SimHub Core<br/>同裝置絕對值保守加總"]
+    dashboard["SimHub 62 個屬性與 Dashboard"]
+  end
+
+  subgraph release["GitHub v0.3 發行信任鏈"]
+    baseEvent["repository_dispatch<br/>ffb-experimental-base-release"]
+    fullEvent["repository_dispatch<br/>ffb-full-release"]
+    basePayload["payload 剛好只有 canonical tag"]
+    fullPayload["payload 剛好是 tag／channel／本機 SimHub 路徑"]
+    source["default branch master workflow<br/>tag 綁定當下 master HEAD"]
+    tagRule["tag ruleset 21893944<br/>refs/tags/v* 禁止更新／刪除"]
+    checks["11 個必要 CI／安全檢查"]
+    base["Hosted Experimental 基礎流程<br/>固定未簽章／不讀 Stable secrets"]
+    environment["stable-signing environment<br/>只允許 master／reviewer xup61069"]
+    full["ephemeral self-hosted 完整流程<br/>Windows／X64／simhub-sdk"]
+    sdk["SimHub 9.11.22 精確長度＋SHA-256"]
+    channel{"channel？"}
+    experimental["Full Experimental<br/>固定未簽章／不讀 Stable secrets"]
+    stable["Stable-only：讀取釘選 PFX<br/>簽章後以 DeleteKey 清理"]
+    assets["精確資產集合、雙格式 SBOM、SHA256SUMS、provenance"]
+    metadata["最後才發布／更新 Release metadata"]
+    immutable["GitHub immutable release"]
+    runnerGap["尚未提供可用的一次性 ephemeral runner"]
+    signingGap["尚未提供公信 PFX／簽章 secrets"]
+    hardwareGap["尚無實體方向盤／商業遊戲測試證據"]
+  end
+
+  user --> manager
+  manager --> verify --> lock
+  lock -->|"只在安裝／移除時要求 UAC"| broker
+  broker --> ps --> installer --> core
+  lock -->|"遊戲永遠不提權"| launcher --> game
+  launcher --> hook --> dinput --> pipe --> core --> dashboard
+
+  baseEvent --> basePayload --> source
+  fullEvent --> fullPayload --> source
+  tagRule -.->|"保護已綁定 tag"| source
+  source --> checks
+  checks --> base --> assets
+  checks --> environment --> full
+  sdk --> full
+  full --> channel
+  channel -- "experimental" --> experimental --> assets
+  channel -- "stable" --> stable --> assets
+  assets --> metadata --> immutable
+  runnerGap -.->|"目前阻擋 Full"| full
+  signingGap -.->|"目前阻擋 Stable"| stable
+  hardwareGap -.->|"不得宣稱已硬體實測"| user
+
+  base -.->|"不含 SimHub／Launcher 即開即用 ZIP"| user
+  full -.->|"含完整 SimHub／Launcher ZIP"| user

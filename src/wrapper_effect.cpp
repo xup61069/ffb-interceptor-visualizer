@@ -3,12 +3,67 @@
 #include "wrapper_effect.h"
 #include "telemetry.h"
 
+SRWLOCK WrapperEffect::s_registry_lock = SRWLOCK_INIT;
+WrapperEffect* WrapperEffect::s_registry_head = nullptr;
+
 WrapperEffect::WrapperEffect(IDirectInputEffect* real, std::uint32_t device_id,
                              std::uint32_t effect_id, REFGUID effect_guid)
-    : m_real(real), m_guid(effect_guid), m_device_id(device_id), m_effect_id(effect_id) {}
+    : m_real(real), m_guid(effect_guid), m_device_id(device_id), m_effect_id(effect_id) {
+    if (m_real) {
+        IUnknown* identity = nullptr;
+        if (SUCCEEDED(m_real->QueryInterface(
+                IID_IUnknown, reinterpret_cast<void**>(&identity))) &&
+            identity) {
+            // COM guarantees a stable canonical IUnknown identity while the
+            // object is alive. m_real owns that lifetime, so the QI reference
+            // can be released after retaining the pointer as a lookup key.
+            m_identity = identity;
+            identity->Release();
+        }
+    }
+    register_instance();
+}
 
 WrapperEffect::~WrapperEffect() {
     if (m_real) m_real->Release();
+}
+
+void WrapperEffect::register_instance() noexcept {
+    AcquireSRWLockExclusive(&s_registry_lock);
+    m_registry_next = s_registry_head;
+    s_registry_head = this;
+    m_registered = true;
+    ReleaseSRWLockExclusive(&s_registry_lock);
+}
+
+void WrapperEffect::unregister_instance_locked() noexcept {
+    if (!m_registered) return;
+    WrapperEffect** link = &s_registry_head;
+    while (*link && *link != this) link = &((*link)->m_registry_next);
+    if (*link == this) *link = m_registry_next;
+    m_registry_next = nullptr;
+    m_registered = false;
+}
+
+WrapperEffect* WrapperEffect::find_and_add_ref(IDirectInputEffect* real) noexcept {
+    if (!real) return nullptr;
+    IUnknown* identity = nullptr;
+    real->QueryInterface(IID_IUnknown,
+                         reinterpret_cast<void**>(&identity));
+    WrapperEffect* result = nullptr;
+    AcquireSRWLockShared(&s_registry_lock);
+    for (WrapperEffect* current = s_registry_head; current;
+         current = current->m_registry_next) {
+        if (current->m_real == real ||
+            (identity && current->m_identity == identity)) {
+            InterlockedIncrement(&current->m_ref_count);
+            result = current;
+            break;
+        }
+    }
+    ReleaseSRWLockShared(&s_registry_lock);
+    if (identity) identity->Release();
+    return result;
 }
 
 HRESULT STDMETHODCALLTYPE WrapperEffect::QueryInterface(REFIID riid, void** out) {
@@ -27,7 +82,10 @@ ULONG STDMETHODCALLTYPE WrapperEffect::AddRef() {
 }
 
 ULONG STDMETHODCALLTYPE WrapperEffect::Release() {
+    AcquireSRWLockExclusive(&s_registry_lock);
     const ULONG count = static_cast<ULONG>(InterlockedDecrement(&m_ref_count));
+    if (count == 0) unregister_instance_locked();
+    ReleaseSRWLockExclusive(&s_registry_lock);
     if (count == 0) {
         ffb::Event event{};
         event.type = ffb::MessageType::EffectCommand;

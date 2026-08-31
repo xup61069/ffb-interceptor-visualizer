@@ -26,6 +26,12 @@ public:
     WrapperDevice8(Base* real, std::uint32_t device_id);
     ~WrapperDevice8();
     bool valid() const noexcept;
+    // Publish an owned real interface or reuse the wrapper already associated
+    // with the same canonical COM identity. On success ownership of `real` is
+    // consumed; on failure the caller remains responsible for that reference.
+    static WrapperDevice8* publish_or_add_ref(Base* real,
+                                              std::uint32_t device_id,
+                                              bool* created) noexcept;
     // Dispose a wrapper that was never published while preserving the
     // caller-owned real COM reference for fail-open fallback.
     void discard_unpublished() noexcept;

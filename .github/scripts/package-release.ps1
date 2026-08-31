@@ -1,4 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-only
+[CmdletBinding()]
+param(
+    [string]$SigningCertificateThumbprint = $env:FFB_SIGNING_CERT_SHA1,
+    [string]$TimestampUrl = 'http://timestamp.digicert.com',
+    [switch]$RequireSigning
+)
+
 $ErrorActionPreference = 'Stop'
 $root = (Get-Location).Path
 $releaseDirectory = Join-Path $root 'release'
@@ -56,7 +63,9 @@ $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer
 $vsroot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 $devcmd = Join-Path $vsroot 'Common7/Tools/VsDevCmd.bat'
 cmd.exe /d /c "call `"$devcmd`" -arch=x64 >nul && cmake --preset msvc-x64-release && cmake --build --preset x64-release --target dinput8"
+if ($LASTEXITCODE -ne 0) { throw 'x64 proxy build failed.' }
 cmd.exe /d /c "call `"$devcmd`" -arch=x86 >nul && cmake -S . -B build/x86-release -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build/x86-release --target dinput8"
+if ($LASTEXITCODE -ne 0) { throw 'x86 proxy build failed.' }
 $proxyX64Stage = Join-Path $stageRoot 'ffb-proxy-x64'
 $proxyX86Stage = Join-Path $stageRoot 'ffb-proxy-x86'
 New-Item -ItemType Directory -Path $proxyX64Stage, $proxyX86Stage | Out-Null
@@ -64,6 +73,16 @@ Copy-Item -LiteralPath build/x64-release/dinput8.dll -Destination $proxyX64Stage
 Copy-Item -LiteralPath build/x86-release/dinput8.dll -Destination $proxyX86Stage
 Add-ReleaseNotices -Destination $proxyX64Stage
 Add-ReleaseNotices -Destination $proxyX86Stage
+$proxySigningArguments = @{
+    Paths = @(
+        (Join-Path $proxyX64Stage 'dinput8.dll'),
+        (Join-Path $proxyX86Stage 'dinput8.dll')
+    )
+    CertificateThumbprint = $SigningCertificateThumbprint
+    TimestampUrl = $TimestampUrl
+}
+if ($RequireSigning) { $proxySigningArguments.RequireSigning = $true }
+& (Join-Path $root '.github\scripts\sign-windows-artifacts.ps1') @proxySigningArguments
 Compress-Archive -Path (Join-Path $proxyX64Stage '*') -DestinationPath release/ffb-proxy-x64.zip -Force
 Compress-Archive -Path (Join-Path $proxyX86Stage '*') -DestinationPath release/ffb-proxy-x86.zip -Force
 $proxyEntries = @(
@@ -77,7 +96,8 @@ $proxyEntries = @(
 Assert-ZipEntries -Archive 'release/ffb-proxy-x64.zip' -RequiredEntries $proxyEntries
 Assert-ZipEntries -Archive 'release/ffb-proxy-x86.zip' -RequiredEntries $proxyEntries
 Push-Location viewer
-uv sync --extra dev
+uv sync --locked --extra dev
+if ($LASTEXITCODE -ne 0) { throw 'Locked viewer environment restore failed.' }
 $previousPath = $env:PATH
 $system32 = [System.IO.Path]::GetFullPath((Join-Path $env:SystemRoot 'System32')).TrimEnd('\\')
 $safePathEntries = foreach ($entry in $previousPath -split ';') {
@@ -103,6 +123,13 @@ if (Get-ChildItem -LiteralPath $viewerInternal -File -Filter 'icu*.dll') {
 }
 $viewerDist = Join-Path (Get-Location) 'dist/ffb-viewer'
 Add-ReleaseNotices -Destination $viewerDist
+$viewerSigningArguments = @{
+    Paths = @((Join-Path $viewerDist 'ffb-viewer.exe'))
+    CertificateThumbprint = $SigningCertificateThumbprint
+    TimestampUrl = $TimestampUrl
+}
+if ($RequireSigning) { $viewerSigningArguments.RequireSigning = $true }
+& (Join-Path $root '.github\scripts\sign-windows-artifacts.ps1') @viewerSigningArguments
 $previousQtPlatform = $env:QT_QPA_PLATFORM
 try {
     $env:QT_QPA_PLATFORM = 'offscreen'
@@ -122,10 +149,16 @@ finally {
         $env:QT_QPA_PLATFORM = $previousQtPlatform
     }
 }
-uv run cyclonedx-py environment --pyproject pyproject.toml --output-reproducible -o ../release/sbom.cdx.json
-uv run python ../.github/scripts/generate-spdx-sbom.py --pyproject pyproject.toml --output ../release/sbom.spdx.json
+uv run cyclonedx-py environment --pyproject pyproject.toml --output-reproducible `
+    -o ../release/python-environment.cdx.json
+if ($LASTEXITCODE -ne 0) { throw 'Python CycloneDX SBOM generation failed.' }
+uv run python ../.github/scripts/generate-spdx-sbom.py --pyproject pyproject.toml `
+    --output ../release/python-environment.spdx.json
+if ($LASTEXITCODE -ne 0) { throw 'Python SPDX SBOM generation failed.' }
 Compress-Archive -Path dist/ffb-viewer -DestinationPath ../release/ffb-viewer-x64.zip -Force
 Pop-Location
+python .github/scripts/generate-component-sbom.py --cyclonedx release/sbom.cdx.json --spdx release/sbom.spdx.json
+if ($LASTEXITCODE -ne 0) { throw 'Repository component SBOM generation failed.' }
 Assert-ZipEntries -Archive 'release/ffb-viewer-x64.zip' -RequiredEntries @(
     'ffb-viewer/ffb-viewer.exe',
     'ffb-viewer/LICENSE',

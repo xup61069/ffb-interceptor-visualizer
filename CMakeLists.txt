@@ -1,10 +1,48 @@
 # SPDX-License-Identifier: GPL-3.0-only
 cmake_minimum_required(VERSION 3.20)
-project(ffb_interceptor VERSION 0.2.0 LANGUAGES CXX)
+project(ffb_interceptor VERSION 0.3.0 LANGUAGES CXX)
+
+option(FFB_STABLE_PACKAGE
+    "Require trusted Authenticode signatures for Manager package actions" OFF)
+set(FFB_EXPECTED_SIGNER_SHA256 "" CACHE STRING
+    "Optional SHA-256 certificate thumbprint required in stable packages")
+set(_FFB_EXPECTED_SIGNER_SHA256_NORMALIZED "")
+if (FFB_EXPECTED_SIGNER_SHA256)
+    string(LENGTH "${FFB_EXPECTED_SIGNER_SHA256}" FFB_SIGNER_LENGTH)
+    if (NOT FFB_SIGNER_LENGTH EQUAL 64 OR
+        NOT FFB_EXPECTED_SIGNER_SHA256 MATCHES "^[0-9A-Fa-f]+$")
+        message(FATAL_ERROR
+            "FFB_EXPECTED_SIGNER_SHA256 must contain exactly 64 hexadecimal characters")
+    endif()
+    string(TOUPPER "${FFB_EXPECTED_SIGNER_SHA256}"
+        _FFB_EXPECTED_SIGNER_SHA256_NORMALIZED)
+endif()
+
+if (FFB_STABLE_PACKAGE)
+    set(_FFB_MANAGER_POLICY_MODE "STABLE")
+    if (_FFB_EXPECTED_SIGNER_SHA256_NORMALIZED)
+        set(_FFB_MANAGER_POLICY_SIGNER
+            "${_FFB_EXPECTED_SIGNER_SHA256_NORMALIZED}")
+    else()
+        set(_FFB_MANAGER_POLICY_SIGNER "UNPINNED")
+    endif()
+else()
+    set(_FFB_MANAGER_POLICY_MODE "EXPERIMENTAL")
+    set(_FFB_MANAGER_POLICY_SIGNER "NONE")
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+if (MSVC)
+    # Release archives are extracted into user-writable directories. Keep the
+    # Microsoft runtime inside each binary and force statically imported
+    # Windows dependencies to resolve only from System32, so an app-local DLL
+    # cannot run before Manager/Launcher policy checks reach main().
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    add_link_options("/DEPENDENTLOADFLAG:0x800")
+endif()
 
 add_library(dinput8 SHARED
     src/dllmain.cpp
@@ -72,15 +110,67 @@ target_compile_definitions(ffb_launcher PRIVATE
     _UNICODE
 )
 
+add_executable(ffb_e2e_probe tests/e2e/directinput_probe.cpp)
+set_target_properties(ffb_e2e_probe PROPERTIES
+    OUTPUT_NAME "FFBInterceptor.E2E.Probe"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/e2e"
+)
+target_compile_definitions(ffb_e2e_probe PRIVATE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+    DIRECTINPUT_VERSION=0x0800
+    UNICODE
+    _UNICODE
+)
+target_link_libraries(ffb_e2e_probe PRIVATE dxguid)
+
+add_executable(ffb_manager WIN32
+    launcher/manager_main.cpp
+    launcher/manager_model.cpp
+    launcher/pe_arch.cpp
+)
+set_target_properties(ffb_manager PROPERTIES
+    OUTPUT_NAME "FFBInterceptor.Manager"
+)
+target_include_directories(ffb_manager PRIVATE launcher)
+target_compile_definitions(ffb_manager PRIVATE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+    UNICODE
+    _UNICODE
+    FFB_BUILD_VERSION="${PROJECT_VERSION}"
+    FFB_STABLE_PACKAGE=$<BOOL:${FFB_STABLE_PACKAGE}>
+    FFB_EXPECTED_SIGNER_SHA256="${_FFB_EXPECTED_SIGNER_SHA256_NORMALIZED}"
+    FFB_MANAGER_POLICY_SIGNER="${_FFB_MANAGER_POLICY_SIGNER}"
+)
+target_link_libraries(ffb_manager PRIVATE
+    advapi32
+    bcrypt
+    comctl32
+    comdlg32
+    crypt32
+    ole32
+    shell32
+    uuid
+    wintrust
+)
+
 # Suppress noisy warnings from Windows SDK COM macros
 if (MSVC)
     target_compile_options(dinput8 PRIVATE /W4 /WX /EHsc)
     target_compile_options(ffb_hook PRIVATE /W4 /WX /EHsc)
     target_compile_options(ffb_launcher PRIVATE /W4 /WX /EHsc /utf-8)
+    target_compile_options(ffb_e2e_probe PRIVATE /W4 /WX /EHsc)
+    target_compile_options(ffb_manager PRIVATE /W4 /WX /EHsc /utf-8)
+    target_link_options(ffb_manager PRIVATE
+        "/MANIFESTUAC:level='asInvoker' uiAccess='false'"
+    )
 else()
     target_compile_options(dinput8 PRIVATE -Wall -Wextra -Wpedantic -Werror)
     target_compile_options(ffb_hook PRIVATE -Wall -Wextra -Wpedantic -Werror)
     target_compile_options(ffb_launcher PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(ffb_e2e_probe PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    target_compile_options(ffb_manager PRIVATE -Wall -Wextra -Wpedantic -Werror)
 endif()
 
 include(CTest)
@@ -189,4 +279,39 @@ if(BUILD_TESTING)
             -Wall -Wextra -Wpedantic -Werror)
     endif()
     add_test(NAME ffb_iat_hook_tests COMMAND ffb_iat_hook_tests)
+
+    add_executable(ffb_manager_tests
+        launcher/tests/manager_model_tests.cpp
+        launcher/manager_model.cpp
+    )
+    target_include_directories(ffb_manager_tests PRIVATE launcher)
+    target_compile_definitions(ffb_manager_tests PRIVATE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        UNICODE
+        _UNICODE
+        FFB_STABLE_PACKAGE=0
+        FFB_EXPECTED_SIGNER_SHA256=""
+        FFB_MANAGER_POLICY_SIGNER="NONE"
+    )
+    if (MSVC)
+        target_compile_options(ffb_manager_tests PRIVATE /W4 /WX /EHsc /utf-8)
+    else()
+        target_compile_options(ffb_manager_tests PRIVATE
+            -Wall -Wextra -Wpedantic -Werror)
+    endif()
+    target_link_libraries(ffb_manager_tests PRIVATE
+        advapi32
+        bcrypt
+        crypt32
+        ole32
+        shell32
+        uuid
+        wintrust
+    )
+    add_dependencies(ffb_manager_tests ffb_manager)
+    add_test(NAME ffb_manager_tests COMMAND ffb_manager_tests
+        "$<TARGET_FILE:ffb_manager>"
+        "${_FFB_MANAGER_POLICY_MODE}"
+        "${_FFB_MANAGER_POLICY_SIGNER}")
 endif()
