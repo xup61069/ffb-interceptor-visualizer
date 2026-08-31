@@ -74,23 +74,21 @@ namespace FFBInterceptor.E2E.Tests
                 NowMilliseconds))
             {
                 server.Start();
-                using (var launcher = Process.Start(new ProcessStartInfo
+                var launcher = LauncherProcess.Run(
+                    launcherPath,
+                    "--offline-only --game " + Quote(probePath) + " -- --hold-ms 5000",
+                    Path.GetDirectoryName(launcherPath),
+                    15000);
+                if (launcher.ExitCode != 0)
                 {
-                    FileName = launcherPath,
-                    Arguments = "--offline-only --game " + Quote(probePath) + " -- --hold-ms 5000",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                }))
-                {
-                    if (launcher == null) throw new InvalidOperationException("launcher did not start");
-                    if (!launcher.WaitForExit(15000))
-                    {
-                        launcher.Kill();
-                        throw new TimeoutException("launcher timed out");
-                    }
-                    if (launcher.ExitCode != 0)
-                        throw new InvalidOperationException("launcher exit " + launcher.ExitCode);
+                    throw new InvalidOperationException(
+                        "launcher exit " + launcher.ExitCode +
+                        (launcher.UsedLuaToken ? " (verified LUA token)" : string.Empty) +
+                        "\nstdout:\n" + launcher.StandardOutput +
+                        "\nstderr:\n" + launcher.StandardError);
                 }
+                if (launcher.UsedLuaToken)
+                    Console.WriteLine("INFO Launcher started with a verified LUA token");
 
                 if (!sourceObserved.Wait(8000)) throw new TimeoutException("producer Hello was not observed");
                 if (!deviceObserved.Wait(8000)) throw new TimeoutException("DeviceCreated was not observed");

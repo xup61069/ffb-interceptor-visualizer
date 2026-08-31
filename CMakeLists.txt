@@ -41,7 +41,11 @@ if (MSVC)
     # Windows dependencies to resolve only from System32, so an app-local DLL
     # cannot run before Manager/Launcher policy checks reach main().
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-    add_link_options("/DEPENDENTLOADFLAG:0x800")
+    # Visual Studio native coverage instrumentation adds a static import for
+    # static_covrun*.dll, which intentionally lives outside System32. Keep the
+    # release-package boundary strict without making instrumented
+    # RelWithDebInfo test executables impossible to start.
+    add_link_options("$<$<CONFIG:Release>:/DEPENDENTLOADFLAG:0x800>")
 endif()
 
 add_library(dinput8 SHARED
