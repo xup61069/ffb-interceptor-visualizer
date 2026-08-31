@@ -1,0 +1,242 @@
+name: Full SimHub release
+
+on:
+  repository_dispatch:
+    types: [ffb-full-release]
+
+concurrency:
+  group: release-${{ github.event.client_payload.tag }}
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  RELEASE_TAG: ${{ github.event.client_payload.tag }}
+  RELEASE_CHANNEL: ${{ github.event.client_payload.channel }}
+  SIMHUB_INSTALL_PATH: ${{ github.event.client_payload.simhub_path }}
+
+jobs:
+  build:
+    name: sdk-package-attest-and-publish
+    if: ${{ github.event_name == 'repository_dispatch' && github.ref == 'refs/heads/master' }}
+    environment: stable-signing
+    runs-on: [self-hosted, Windows, X64, simhub-sdk, ephemeral]
+    permissions:
+      actions: read # inspect workflow checks for the tagged commit
+      checks: read # inspect check runs for the tagged commit
+      contents: write # publish immutable assets to the requested tag
+      id-token: write # mint the OIDC identity used by provenance
+      attestations: write # store provenance for every release asset
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: refs/heads/master
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate repository dispatch payload
+        shell: pwsh
+        env:
+          FFB_CLIENT_PAYLOAD_JSON: ${{ toJson(github.event.client_payload) }}
+        run: |
+          $payload = $env:FFB_CLIENT_PAYLOAD_JSON | ConvertFrom-Json -ErrorAction Stop
+          $names = @($payload.PSObject.Properties | ForEach-Object Name | Sort-Object)
+          $expectedNames = @('channel', 'simhub_path', 'tag')
+          if ($names.Count -ne $expectedNames.Count -or
+              (Compare-Object -ReferenceObject $expectedNames -DifferenceObject $names)) {
+            throw 'Full release client_payload must contain exactly: tag, channel, simhub_path.'
+          }
+          $tag = [string]$payload.tag
+          $channel = [string]$payload.channel
+          $simHubPath = [string]$payload.simhub_path
+          if ($tag -cne $env:RELEASE_TAG -or
+              $tag -notmatch '^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\z') {
+            throw 'Full release client_payload.tag must be a canonical vX.Y.Z tag.'
+          }
+          if ($channel -cne $env:RELEASE_CHANNEL -or $channel -cnotin @('experimental', 'stable')) {
+            throw 'Full release client_payload.channel must be exactly experimental or stable.'
+          }
+          if ([string]::IsNullOrWhiteSpace($simHubPath) -or $simHubPath.Length -gt 1024 -or
+              $simHubPath -notmatch '^[A-Za-z]:\\' -or
+              $simHubPath.IndexOfAny([IO.Path]::GetInvalidPathChars()) -ge 0 -or
+              $simHubPath.IndexOfAny([char[]]'*?') -ge 0) {
+            throw 'Full release client_payload.simhub_path must be a bounded absolute local drive path.'
+          }
+          $normalisedSimHubPath = [IO.Path]::GetFullPath($simHubPath)
+          if (-not [IO.Path]::IsPathRooted($normalisedSimHubPath)) {
+            throw 'Full release client_payload.simhub_path did not resolve to an absolute path.'
+          }
+          "SIMHUB_INSTALL_PATH=$normalisedSimHubPath" |
+            Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Bind release tag to trusted master HEAD
+        id: bind-release
+        shell: pwsh
+        run: |
+          $commit = .github/scripts/verify-release-ref.ps1 `
+            -RefreshRemote -RequireMasterHead -PassThru
+          if ($commit -notmatch '^[0-9a-f]{40}$') { throw 'Release binding returned an invalid commit SHA.' }
+          "commit_sha=$commit" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "FFB_RELEASE_COMMIT=$commit" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ steps.bind-release.outputs.commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify bound release ref and exact-commit checks
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          .github/scripts/verify-release-ref.ps1 -RefreshRemote `
+            -ExpectedCommitSha $env:FFB_RELEASE_COMMIT
+          .github/scripts/wait-required-checks.ps1 `
+            -Repository $env:GITHUB_REPOSITORY `
+            -CommitSha (git rev-parse HEAD).Trim()
+      - name: Require an empty Full release asset slot
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/assert-release-assets-empty.ps1
+      - name: Verify installed SimHub SDK fingerprint
+        shell: pwsh
+        run: simhub/tools/Test-SimHubSdk.ps1 -SimHubInstallPath $env:SIMHUB_INSTALL_PATH
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: '0.12.5'
+          enable-cache: false
+      - name: Configure unsigned Full experimental channel
+        if: ${{ env.RELEASE_CHANNEL == 'experimental' }}
+        shell: pwsh
+        run: |
+          @(
+            'FFB_SIGNING_CERT_SHA1=',
+            'FFB_SIGNER_SHA256=',
+            'FFB_SIGNING_CERT_THUMBPRINTS=',
+            'FFB_REMOVE_SIGNING_CERTIFICATE=0'
+          ) | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host 'Full experimental release is explicitly UNSIGNED.'
+      - name: Load Stable release signing identity and policy
+        if: ${{ env.RELEASE_CHANNEL == 'stable' }}
+        shell: pwsh
+        env:
+          FFB_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
+          FFB_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
+          FFB_EXPECTED_SIGNER_SHA256: ${{ secrets.WINDOWS_SIGNER_SHA256 }}
+        run: |
+          .github/scripts/import-signing-certificate.ps1 -RequireSigning
+      - name: Build channel-policy launcher, hook, manager, and tests
+        shell: pwsh
+        run: |
+          $stable = $env:RELEASE_CHANNEL -eq 'stable'
+          if ($stable -and $env:FFB_SIGNER_SHA256 -notmatch '^[A-F0-9]{64}$') {
+            throw 'Stable Manager build requires the pinned signer SHA-256.'
+          }
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vsroot = & $vswhere -latest -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if ($LASTEXITCODE -ne 0 -or -not $vsroot) { throw 'Visual Studio C++ tools were not found.' }
+          $devcmd = Join-Path $vsroot 'Common7\Tools\VsDevCmd.bat'
+          $stableValue = if ($stable) { 'ON' } else { 'OFF' }
+          $signer = if ($stable) { $env:FFB_SIGNER_SHA256 } else { '' }
+          foreach ($architecture in @('x64', 'x86')) {
+            $build = "build\$architecture-sdk"
+            $command = "call `"$devcmd`" -arch=$architecture >nul && " +
+              "cmake -S . -B $build -G Ninja -DCMAKE_BUILD_TYPE=Release " +
+              "-DFFB_STABLE_PACKAGE=$stableValue -DFFB_EXPECTED_SIGNER_SHA256=$signer && " +
+              "cmake --build $build --target all && ctest --test-dir $build --output-on-failure"
+            cmd.exe /d /c $command
+            if ($LASTEXITCODE -ne 0) { throw "$architecture full build or test failed." }
+          }
+      - name: Build base, SimHub, and no-game-DLL launcher packages
+        shell: pwsh
+        run: |
+          $stable = $env:RELEASE_CHANNEL -eq 'stable'
+          .github/scripts/package-release.ps1 -RequireSigning:$stable
+          $simhubPackageOutput = [IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP `
+            ('ffb-simhub-release-' + [Guid]::NewGuid().ToString('N'))))
+          $runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'
+          if (-not $simhubPackageOutput.StartsWith($runnerTemp, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Unsafe temporary SimHub package directory.'
+          }
+          [IO.Directory]::CreateDirectory($simhubPackageOutput) | Out-Null
+          try {
+            simhub/tools/Build-SimHubPackage.ps1 `
+              -SimHubInstallPath $env:SIMHUB_INSTALL_PATH `
+              -OutputDirectory $simhubPackageOutput -RequireSigning:$stable
+            $simhubArchives = @(Get-ChildItem -LiteralPath $simhubPackageOutput -File `
+              -Filter 'FFBInterceptor-SimHub-*.zip')
+            if ($simhubArchives.Count -ne 1) {
+              throw 'SimHub build did not produce exactly one release archive.'
+            }
+            $simhubReleaseAsset = Join-Path (Resolve-Path -LiteralPath release) $simhubArchives[0].Name
+            if (Test-Path -LiteralPath $simhubReleaseAsset) {
+              throw "Refusing to overwrite an existing release asset: $simhubReleaseAsset"
+            }
+            Copy-Item -LiteralPath $simhubArchives[0].FullName -Destination $simhubReleaseAsset
+            if ((Get-FileHash -LiteralPath $simhubArchives[0].FullName -Algorithm SHA256).Hash -cne
+                (Get-FileHash -LiteralPath $simhubReleaseAsset -Algorithm SHA256).Hash) {
+              throw 'Copied SimHub release asset failed SHA-256 verification.'
+            }
+          }
+          finally {
+            if (Test-Path -LiteralPath $simhubPackageOutput) {
+              Remove-Item -LiteralPath $simhubPackageOutput -Recurse -Force
+            }
+          }
+          simhub/tools/Build-LauncherPackage.ps1 `
+            -SimHubInstallPath $env:SIMHUB_INSTALL_PATH `
+            -LauncherX64Path 'build\x64-sdk\FFBInterceptor.Launcher.exe' `
+            -HookX64Path 'build\x64-sdk\FFBInterceptor.Hook.dll' `
+            -LauncherX86Path 'build\x86-sdk\FFBInterceptor.Launcher.exe' `
+            -HookX86Path 'build\x86-sdk\FFBInterceptor.Hook.dll' `
+            -ManagerX64Path 'build\x64-sdk\FFBInterceptor.Manager.exe' `
+            -OutputDirectory release -RequireSigning:$stable
+          $checksums = Get-ChildItem -LiteralPath release -File |
+            Where-Object Name -ne 'SHA256SUMS' |
+            Get-FileHash -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash)  $([IO.Path]::GetFileName($_.Path))" }
+          [IO.File]::WriteAllLines((Join-Path (Resolve-Path release) 'SHA256SUMS'),
+            $checksums, [Text.UTF8Encoding]::new($false))
+      - name: Attest complete release provenance
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-path: release/*
+      - name: Publish verified complete release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          .github/scripts/verify-release-ref.ps1 -RefreshRemote `
+            -ExpectedCommitSha $env:FFB_RELEASE_COMMIT
+          $stable = $env:RELEASE_CHANNEL -eq 'stable'
+          $title = if ($stable) { "$env:RELEASE_TAG — 穩定版" } else { "$env:RELEASE_TAG — 實驗版" }
+          $notice = if ($stable) {
+            'SIGNED STABLE — Authenticode 已簽章，且完整套件具有 GitHub provenance attestation。'
+          } else {
+            'UNSIGNED EXPERIMENTAL — 未簽章；只代表指令遙測，不是馬達扭力。'
+          }
+          .github/scripts/publish-release-assets.ps1 `
+            -AssetsDirectory release -Tag $env:RELEASE_TAG `
+            -Repository $env:GITHUB_REPOSITORY -Title $title `
+            -NotesPath '.github/release-notes.md' -ChannelNotice $notice `
+            -Prerelease:(-not $stable)
+      - name: Remove signing identity imported by this run
+        if: ${{ always() && env.RELEASE_CHANNEL == 'stable' }}
+        shell: pwsh
+        run: |
+          $thumbprints = @($env:FFB_SIGNING_CERT_THUMBPRINTS -split ',' |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+          $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+          foreach ($thumbprint in $thumbprints) {
+            if ($thumbprint -cnotmatch '^[A-F0-9]{40}\z' -or -not $seen.Add($thumbprint)) {
+              throw 'Refusing ambiguous signing-certificate cleanup state.'
+            }
+          }
+          foreach ($thumbprint in $thumbprints) {
+            $certificatePath = "Cert:\CurrentUser\My\$thumbprint"
+            if (Test-Path -LiteralPath $certificatePath) {
+              Remove-Item -LiteralPath $certificatePath -DeleteKey -Force
+            }
+          }

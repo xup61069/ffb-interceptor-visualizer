@@ -35,6 +35,15 @@ std::vector<std::uint8_t> load_golden_fixture() {
     return bytes;
 }
 
+std::uint32_t read_u32(const std::vector<std::uint8_t>& bytes,
+                       std::size_t offset) {
+    assert(bytes.size() >= 4 && offset <= bytes.size() - 4);
+    return static_cast<std::uint32_t>(bytes[offset]) |
+           (static_cast<std::uint32_t>(bytes[offset + 1]) << 8) |
+           (static_cast<std::uint32_t>(bytes[offset + 2]) << 16) |
+           (static_cast<std::uint32_t>(bytes[offset + 3]) << 24);
+}
+
 }  // namespace
 
 int main() {
@@ -89,6 +98,43 @@ int main() {
     frame[4] = 1;
     frame[8] ^= 0x01;
     assert(!ffb::valid_frame(frame.data(), frame.size()));
+
+    // Presence is carried in EffectCreated's existing header flags, keeping
+    // the protocol-v1 layout stable. A legal button zero remains payload data
+    // and cannot be confused with an absent DIEFFECT pointer.
+    ffb::Event absent_parameters{};
+    absent_parameters.type = ffb::MessageType::EffectCreated;
+    absent_parameters.effect_parameter_presence =
+        ffb::EffectParameterPresence::Absent;
+    absent_parameters.trigger_button = 0;
+    const auto absent_frame = ffb::serialize_event(absent_parameters);
+    assert(read_u32(absent_frame, 12) ==
+           ffb::kEffectCreatedParametersAbsentFlag);
+
+    ffb::Event present_parameters = absent_parameters;
+    present_parameters.effect_parameter_presence =
+        ffb::EffectParameterPresence::Present;
+    const auto present_frame = ffb::serialize_event(present_parameters);
+    assert(read_u32(present_frame, 12) ==
+           ffb::kEffectCreatedParametersPresentFlag);
+
+    // Legacy protocol-v1 events used Flags=0. Preserve that representation
+    // for Unknown so a newer consumer can select its conservative fallback.
+    ffb::Event legacy_presence = absent_parameters;
+    legacy_presence.effect_parameter_presence =
+        ffb::EffectParameterPresence::Unknown;
+    const auto legacy_presence_frame = ffb::serialize_event(legacy_presence);
+    assert(read_u32(legacy_presence_frame, 12) == 0);
+
+    // Presence bits are context-specific and must never alter SetParameters'
+    // DIEP_* flags.
+    ffb::Event changed_presence{};
+    changed_presence.type = ffb::MessageType::EffectParametersChanged;
+    changed_presence.flags = DIEP_GAIN;
+    changed_presence.effect_parameter_presence =
+        ffb::EffectParameterPresence::Present;
+    const auto changed_presence_frame = ffb::serialize_event(changed_presence);
+    assert(read_u32(changed_presence_frame, 12) == DIEP_GAIN);
 
     ffb::Event opaque{};
     opaque.effect_kind = ffb::EffectKind::Custom;

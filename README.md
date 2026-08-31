@@ -1,197 +1,231 @@
-# FFB Interceptor + Visualizer（台灣繁體中文）
+# FFB Interceptor + Visualizer 0.3.0
 
-FFB Interceptor 是一套**未經數位簽章的實驗性** Windows 工具，用來觀察遊戲透過
-DirectInput8 傳送的力回饋（Force Feedback，FFB）命令，並在即時檢視器中顯示命令
-參數。每一個 DirectInput 呼叫與 HRESULT 都會原樣轉送。畫面上的
-**Command Peak/RMS** 代表所選 API 通道的命令值，不是方向盤馬達的實際扭力量測。
+FFB Interceptor 會觀察遊戲送出的 DirectInput8 力回饋「命令」，把資料送到 SimHub
+外掛或獨立 Python 檢視器。它不會量到方向盤基座／馬達的實際扭力，也不是反作弊、
+駕駛安全或硬體保護裝置。
 
-v0.2.0 支援 x86／x64 的 C++17 `dinput8.dll` Proxy DLL（代理 DLL）、**不改遊戲
-DLL 的離線啟動器／Hook（攔截模組）**、Python 3.12+ x64 PySide6／pyqtgraph
-檢視器，以及 .NET Framework 4.8 SimHub 外掛。Proxy DLL 源自
-[walmis/dcs-force-feedback-fix](https://github.com/walmis/dcs-force-feedback-fix)
-v0.2（MIT），並保留原始歷史；本專案新增程式碼採 GPL-3.0-only。
+> 高扭力方向盤可能突然動作。請先把增益調到最低、讓手部遠離轉動範圍、準備實體
+> 急停，並只在離線／單機環境測試。
 
-## 快速開始（建議方式）
+## 首選：下載、解壓縮、雙擊 Manager
 
-取得或自行建置 `FFBInterceptor-Launcher-*.zip` 後，建議使用這個不改遊戲 DLL 的
-版本。它不會在遊戲資料夾放置或替換 `dinput8.dll`：
+一般使用者不必自己建置，也不必把任何 DLL 放進遊戲資料夾。
 
-1. 解壓縮整個 ZIP，不要直接從壓縮檔內執行。
-2. 關閉 SimHub。
-3. 雙擊 `Start-FFBInterceptor.cmd`。
-4. Windows 顯示 UAC 時按「是」；系統管理員權限只用來安裝 SimHub 外掛，不會用來啟動遊戲。
-5. SimHub 開啟後，到 **Settings → Plugins** 啟用 **FFB Interceptor**。
-6. 依自動開啟的 SimHub 畫面匯入儀表板（Dashboard）／覆疊顯示（Overlay），再回到提示視窗按 Enter。
-7. 再次雙擊 `Start-FFBInterceptor.cmd`，選擇真正的離線遊戲 `.exe`。
+1. 到 [GitHub Releases](https://github.com/xup61069/ffb-interceptor-visualizer/releases)，
+   下載 `FFBInterceptor-Launcher-0.3.0.zip`。不要下載名稱含 `source` 或
+   `ffb-proxy` 的檔案來代替它。
+2. 驗證 Release 頻道、`SHA256SUMS` 與來源證明後，把整個 ZIP 解壓縮到本機固定
+   資料夾；不要直接在壓縮檔預覽視窗內執行。
+3. 正常雙擊 `FFBInterceptor.Manager.exe`，不要選「以系統管理員身分執行」。
+4. 第一次使用時，選擇離線遊戲 EXE 與 SimHub 安裝資料夾，按「安裝／更新插件」。
+   Windows 只會在安裝 SimHub 外掛時要求 UAC。
+5. 到 SimHub 的 **Settings → Plugins** 啟用 **FFB Interceptor**，視需要匯入套件內
+   Dashboard／Overlay，回到 Manager 按「一鍵啟動」。
+6. 之後只要雙擊 Manager、選遊戲設定檔，再按「一鍵啟動」。Manager 可保存最多
+   64 個遊戲設定檔，只記錄名稱、路徑、啟動參數與偏好，不保存帳號、密碼或 Token。
 
-平常使用只要執行第 7 步。完整白話操作、解除安裝與疑難排解請見
-[SimHub 不改遊戲 DLL 版操作說明](simhub/LAUNCHER.zh-TW.md)。
+SimHub 安裝根目錄必須位於實體固定本機磁碟；網路／卸除式磁碟、`SUBST` 磁碟代號、
+junction 或其他 reparse 路徑會被拒絕，避免 UAC 驗證後目的路徑被換到別處。
 
-## 支援範圍與安全提醒
+這個首選套件完全不包含、也不會在遊戲目錄放置或修改 `dinput8.dll`。Manager 只會
+呼叫套件內固定的 x86／x64 Launcher 與 Hook，建立使用者明確選取的新遊戲子程序；
+不會指定既有 PID、不會附加到已執行程序，也不能選任意 DLL。Hook 只在該新子程序的
+記憶體中接上 `DirectInput8Create`，不修改遊戲 EXE 或遊戲資料夾。
 
-目前只支援透過 `DirectInput8Create` 建立的 DirectInput8 裝置。GameInput、WinRT、
-XInput 與私有 SDK 路徑不在 v0.2.0 支援範圍。本專案不提供反作弊規避、線上競技功能、
-驅動程式／HID Hook、任意記憶體掃描、網路服務或實體扭力量測。啟動器只會解析它
-所建立之新子處理程序內、受邊界限制的 PE 匯入資料。iRacing 明列為不支援項目，
-這是專案的支援政策，不是 GPL 額外附加的用途限制。
+完整 Launcher ZIP 只能由具有指紋相符之 SimHub SDK 的完整發行流程產生。如果某個
+Release 頁面沒有 `FFBInterceptor-Launcher-0.3.0.zip`，代表該次只有 GitHub-hosted
+基礎實驗版資產，尚未提供即開即用的 Manager 套件；請勿把 Proxy ZIP 當成替代品。
 
-高扭力方向盤基座可能突然動作。請讓手部遠離轉動範圍、準備實體急停、從最低增益
-（gain）開始，並只在離線環境測試。建議使用的啟動器套件不含 `dinput8.dll`，也不會
-寫入遊戲資料夾；執行時仍會把同資料夾內的固定 Hook 載入它剛建立的新子處理程序。
-它不能指定既有 PID 或其他 DLL，也會拒絕以系統管理員權限執行，以及 Windows 系統
-目錄內的目標。
+更詳細的 Manager 操作見 [即開即用管理器說明](launcher/MANAGER.zh-TW.md)。
 
-傳統 Proxy DLL 模式仍然保留。使用該模式時，絕對不要直接覆寫遊戲原本的
-`dinput8.dll`；請先保留原檔，並確保能完整還原。
+## Stable 與 Experimental 要怎麼分
 
-## 建置 Windows 資料來源端
+| 頻道 | 啟動規則 | 使用者應做的驗證 |
+| --- | --- | --- |
+| Stable（穩定版） | Manager 以 fail-closed 政策建置。它會驗證執行中 Manager，以及 manifest 內所有 `.exe`、`.dll`、`.ps1`、`.psm1`；目前 Launcher allowlist 合計 11 個簽章 payload。全部必須通過 Windows Authenticode 信任鏈與撤銷檢查、使用同一簽署者，並符合建置時釘選的憑證 SHA-256；任一項失敗就拒絕安裝與啟動。 | 先在 Windows 檔案內容確認數位簽章，再核對 `SHA256SUMS`。Stable 流程已實作，但本儲存庫不宣稱目前已擁有公信程式碼簽章憑證、可用的專屬 runner，或已發布 Stable 資產。 |
+| Experimental（實驗版） | 兩條公開發行流程的 Experimental 都固定不簽章，也完全不讀 Stable 的簽章 secrets。Manager 仍會嚴格驗證套件內 `SHA256SUMS.txt`、必要檔案、精確清單與逐檔 SHA-256，但不把 Authenticode 當成啟動門檻，介面會顯示警告。 | 從官方 Release 下載，核對外層 `SHA256SUMS`，並在執行前以 GitHub CLI 的 `gh attestation verify <檔案> --repo xup61069/ffb-interceptor-visualizer` 驗證 provenance attestation。Attestation 不是 Authenticode，也不能取代解壓後的逐檔雜湊。 |
 
-請安裝 Visual Studio 2022／2026 C++ 工具、Windows SDK、CMake 3.20+ 與 Ninja，
-再從 Visual Studio 開發人員命令提示字元執行：
+Manager 啟動或安裝前還會確認套件沒有缺檔、多檔、重複／跳脫路徑、reparse point
+或雜湊不符，檢查遊戲與 Launcher／Hook 架構一致、SimHub 外掛安裝狀態及具名管道
+readiness。驗證成功後，必要檔案會保持唯讀鎖定直到安裝或遊戲程序完成；若程序逾時而
+狀態不明，Manager 會停用後續變更。診斷資訊可一鍵複製，複製前會把家目錄改寫成
+`%USERPROFILE%`。安全升級與解除安裝只處理受保護安裝狀態所記錄的檔案，發現遭修改
+時會拒絕覆寫或移除。外掛目的目錄與 `%ProgramData%` 安裝狀態在實際寫入期間也會以
+實體磁碟、逐層目錄身分及跨程序、零共享的 delete-on-close mutation lease 重新確認並
+保持鎖定；若既有狀態指向另一個 SimHub 根目錄，必須先解除安裝再切換。
+
+Stable Manager 內含唯一、NUL 結尾的
+`FFB_MANAGER_BUILD_POLICY_V1|MODE=STABLE|SIGNER_SHA256=<64 HEX>|END` marker。封裝器會
+在簽章前後都重新解析 raw PE，要求 marker 完整落在 `.rdata` 的 raw size 與 mapped
+`VirtualSize` 範圍；該區段必須是 initialized-data／READ、不得 WRITE／EXEC，並拒絕
+未釘選、格式錯誤或只塞在 raw padding、憑證表／檔尾 overlay 的 Manager。最後再核對
+Authenticode leaf certificate SHA-256 與 marker 一致，通過後才產生最終 manifest。
+
+Proxy、Hook、Launcher 與 Manager 使用靜態 MSVC CRT，並設定
+`/DEPENDENTLOADFLAG:0x800`，讓 PE 的靜態匯入相依只從 System32 搜尋，降低安全檢查進入
+點之前的 app-local DLL 劫持面；這不會替任意動態載入提供同樣保證。
+
+## 削峰偵測的白話定義
+
+v0.3.0 使用 `ConservativeAbsoluteSumPerDevice`（同裝置絕對值保守加總）：
+
+- 對同一來源／session 內，每一個 DirectInput 裝置分開計算。當下正在播放且可建模的
+  Constant、Ramp、Periodic 效果，會先取瞬時命令的絕對值，再在「同一裝置」內加總。
+- 不同裝置的數值不會互加；系統只取各裝置加總值中的最大值。因此方向盤與另一個
+  DirectInput 裝置不會被誤當成同一顆馬達相加。
+- 不同來源／session 也不互加。`AnyClipping` 是對資料可靠之來源做布林 OR，不是把
+  多個遊戲或程序的命令值相加。
+- 同裝置內，實際方向相反的效果可能彼此抵消，但保守模型仍會加上絕對值，所以可能
+  高估、不能低估純量同向碰頂；這是命令削峰上界，不是力向量重建或馬達扭力。
+- 偵測值使用未套用 effect／device gain 的合併命令；套用 gain 後的
+  `CombinedEffectiveCommandLevel` 會另外公開供顯示，不混成實際扭力結論。
+
+預設在合併命令達 98% 時進入 LIMIT 候選；連續 100 ms 碰頂，或最近 1 秒內至少 5%
+的時間碰頂，就觸發 CLIP。低於 95% 且持續 500 ms 才解除。這些門檻都是相對於
+`DI_FFNOMINALMAX` 的 DirectInput 命令比例。
+
+Condition 與 Custom 效果會列入不支援效果計數，但不會被硬猜成力值。若同時有可支援
+效果，仍可對那些效果計算；畫面必須保留「模型受限」資訊。
+
+## 可靠性與容量上限
+
+削峰狀態採 fail-closed：資料不完整時寧可顯示「不可靠」，不繼續沿用可能錯誤的 CLIP。
+
+- Protocol v1 會帶入 TriggerButton 設定，卻沒有遊戲輸入按鍵的即時狀態。只要存在
+  按鍵觸發效果，就無法知道驅動何時自行開始播放；該來源會標成
+  `TriggerStateUnavailable`，`DataReliable`、`AtLimit` 與 `IsClipping` 會停用。
+- 封包遺失、舊 session 重連或狀態容量超限，也會清除／停用舊削峰結論並公開原因與
+  drop counter。每來源問題需建立新的 producer session；若全域 source 容量曾超限，
+  `_sourceStateDrops` 會保持 fail-closed，需重啟 SimHub／接收端建立新的 Core instance。
+- Core 最多保留 64 個來源；每個來源最多 64 個裝置、1,024 個效果。超出時不會靜默
+  截斷後照常判定，而是增加容量 drop 並停用受影響的削峰結論。
+- SimHub 安全具名管道最多同時接受 32 個 client；每個 frame 上限 64 KiB、最多 8 軸。
+  每來源診斷 transition queue 上限 256；公開 SimHub 事件則由已發布 snapshot 的邊緣
+  產生，不依賴這個可丟棄的診斷佇列。
+
+## SimHub SDK 相容性指紋
+
+可安裝外掛只允許使用儲存庫列入矩陣的真實 SimHub SDK 建置，不會 vendoring 或重新
+散布 SimHub 自有組件。v0.3.0 目前只有 SimHub **9.11.22** 的 exact-length-and-SHA256
+profile（矩陣紀錄日期 2026-08-30）：
+
+| 檔案 | 位元組 | SHA-256 |
+| --- | ---: | --- |
+| `GameReaderCommon.dll` | 388248 | `7A5EE7BA3D81B5DC373EA81C28967B06F5CC1CDF32D375DDA33EDEA9137A719F` |
+| `log4net.dll` | 270336 | `1D45A6AFA38F0B10814063F2A42E6EFCE45752853667650E765844B8566B3332` |
+| `SimHub.Logging.dll` | 14488 | `35FDD0CE83D0B0124B634849C186E200F20EA553EA0C9EBECF8651FAF3C69293` |
+| `SimHub.Plugins.dll` | 9472664 | `F36D1930270089F6E8AC3B909D2B0A75A9A40EB22AC75ED551FD8831373D16EF` |
+
+四個檔案必須全部存在，且長度與 SHA-256 同時完全相符；其他 SimHub 版本會拒絕產生
+可發布外掛。這是建置 API 相容性閘門，不代表已用該版本完成所有商業遊戲或實體方向盤
+測試。權威資料見 [SDK 相容矩陣](simhub/sdk-compatibility.json)。
+
+## CI、E2E 與覆蓋率
+
+GitHub-hosted Windows CI 不需要 proprietary SimHub SDK，就能執行以下驗證：
+
+- x86／x64 建置 Proxy、Launcher、Hook、Manager 與原生測試。
+- 專案自有的 `FFBInterceptor.E2E.Probe.exe` 透過真正的系統 DirectInput8，驗證
+  **Launcher → Hook → DirectInput8 → current-user secure pipe → SimHub Core** 完整路徑；
+  測試會先確認 fixture 目錄沒有 `dinput8.dll`。這是受控 fixture E2E，不是商業遊戲
+  或實體方向盤測試。由於 GitHub Windows runner 固定以關閉 UAC 的管理員執行，CI
+  會在隔離暫存目錄用一次性標準使用者帳號執行正式 Launcher，完成後刪除帳號與暫存；
+  測試期間只把該帳號 SID 暫時加入目前 runner 的互動 window station／desktop ACL，
+  結束時先確認 ACL 未被其他程序變更，再還原完整原始 ACL；若已變更就拒絕覆寫。
+  整段作業另以跨程序鎖序列化，再刪除帳號，不會為測試編入提權繞過。IAT 單元測試另
+  同時覆蓋 `DirectInput8Create` 的名稱匯入與 `dinput8.dll` ordinal 1 匯入，且不會覆寫
+  已被其他元件修改的 IAT 項目。
+- 原生 `/src/` 與 `/launcher/manager_model.cpp` 的產品程式碼合併 line coverage 至少
+  50%，且至少追蹤 900 行，兩個路徑都必須出現在報告；SimHub Core line coverage
+  至少 75%、追蹤至少 500 行；
+  Python viewer 的 pytest coverage 門檻為 85%。
+- Python 3.12／3.13 的 lint、型別與測試，以及 dashboard schema、安裝器 fixture、
+  SDK／release gate fixture、CodeQL C++／C#／Python、dependency audit、完整歷史
+  gitleaks、actionlint、zizmor 與 SPDX header audit。
+
+上述是自動化與合成測試證據。除非另有可重現報告，專案目前不宣稱完成實體高扭力
+方向盤、所有商業遊戲、反作弊環境或長時間硬體 endurance 測試。
+
+## Release 資產與 SBOM
+
+兩條公開發行 workflow 都只接受授權維護者送出的 `repository_dispatch`，而且只從
+預設分支 `master` 載入 workflow。基礎流程的 payload 必須剛好只有 `tag`；完整流程
+必須剛好只有 `tag`、`channel` 與 `simhub_path`。欄位多一個、少一個或格式不合都會
+停止。建立或推送 tag 本身不會發布 Release；維護者仍須先為該 tag 選定唯一 publisher。
+
+GitHub-hosted Experimental 基礎發行會產生：
+
+- `ffb-proxy-x86.zip`、`ffb-proxy-x64.zip`（傳統模式，不是首選）；
+- `ffb-viewer-x64.zip`；
+- `ffb-interceptor-visualizer-v0.3.0-source.zip`；
+- `sbom.cdx.json`（CycloneDX 1.6）與 `sbom.spdx.json`（SPDX 2.3）；
+- `python-environment.cdx.json` 與 `python-environment.spdx.json`；
+- `SHA256SUMS` 與每個資產的 GitHub build-provenance attestation。
+
+component SBOM 不只列 ZIP：它包含 8 個第一方元件（Proxy、Hook、Launcher、Manager、
+Core、SimHub adapter、Dashboards、Viewer）、`uv.lock` 中完整的 registry Python
+元件與依賴關係，以及未重新散布、僅供建置的 SimHub SDK exact fingerprint。
+Python environment SBOM 則描述實際鎖定／安裝的 Python 發行套件；兩套都各有
+CycloneDX 與 SPDX 格式。
+
+完整 self-hosted 發行才會另外加入 `FFBInterceptor-SimHub-0.3.0.zip` 與首選的
+`FFBInterceptor-Launcher-0.3.0.zip`，runner labels 必須完整符合
+`[self-hosted, Windows, X64, simhub-sdk, ephemeral]`。資產一旦同名上傳就不可由發行
+腳本覆寫。
+
+截至 2026-08-31，GitHub 已啟用 immutable releases；tag ruleset `21893944` 會保護
+`refs/tags/v*`，禁止更新或刪除；`stable-signing` environment 只允許 `master`，並由
+`xup61069` 審核。目前仍沒有可用的一次性 ephemeral runner、公信程式碼簽章憑證與
+對應 secrets，也沒有實體方向盤／商業遊戲測試證據，因此不能宣稱已具備完整 Stable
+發行條件。操作與恢復規則見 [發行流程](docs/release-process.md)。
+
+## 支援範圍
+
+- 目前只支援透過 `DirectInput8Create` 建立的 x86／x64 DirectInput8 裝置。GameInput、
+  WinRT、XInput、私有 SDK 與驅動／HID Hook 不在 v0.3.0 範圍。
+- Launcher 模式只支援使用者明確選取、由它新建立的本機離線子程序；會拒絕系統目錄
+  目標與提升權限執行。專案不提供任意 PID／DLL 注入、記憶體掃描或反作弊規避。
+- iRacing 明列為不支援項目；這是維護者的支援政策，不是 GPL 額外用途限制。
+- 傳統 `dinput8.dll` Proxy 仍供開發與相容性研究，但不是即開即用首選。絕對不要覆寫
+  遊戲原有同名 DLL；先建立可驗證備份，並確認能完整還原。
+- Named Pipe 限制為本機、目前 Windows 使用者並核對 Hello PID，但同一使用者底下的
+  惡意程序不在完整信任邊界內。所有 telemetry queue 均有容量上限，傳送失敗不阻斷
+  原始 DirectInput 呼叫。
+
+## 從原始碼建置
+
+需求為 Windows、Visual Studio C++ 工具、Windows SDK、CMake 3.20+ 與 Ninja。
 
 ```powershell
 cmake --preset msvc-x64-release
-cmake --build --preset x64-release --target dinput8 ffb_hook ffb_launcher ffb_protocol_tests ffb_wrapper_tests ffb_dinput_wrapper_tests ffb_performance_tests ffb_telemetry_tests ffb_iat_hook_tests
-cmake --preset msvc-x86-release   # 請從 -arch=x86 的開發人員命令提示字元執行
-cmake --build --preset x86-release --target dinput8 ffb_hook ffb_launcher ffb_protocol_tests ffb_wrapper_tests ffb_dinput_wrapper_tests ffb_performance_tests ffb_telemetry_tests ffb_iat_hook_tests
+cmake --build --preset x64-release --target dinput8 ffb_hook ffb_launcher ffb_manager
 ctest --test-dir build/x64-release --output-on-failure
-ctest --test-dir build/x86-release --output-on-failure
 ```
 
-傳統 Proxy DLL 模式必須先備份遊戲既有的 Proxy DLL，才能把建置出的 `dinput8.dll`
-放到遊戲執行檔旁。Proxy DLL 會延後載入 System32 內真正的 `dinput8.dll`；即使檢視器
-沒有執行，DirectInput 呼叫仍會照常原樣轉送，不應阻斷遊戲。
-
-不改遊戲 DLL 的模式必須讓各架構的 `FFBInterceptor.Launcher.exe` 與
-`FFBInterceptor.Hook.dll` 保持在同一個資料夾，再執行：
+x86 請在 `VsDevCmd.bat -arch=x86` 環境設定獨立的 `build/x86-release`。建置 SimHub
+外掛與 Launcher ZIP 前，先用實際安裝的 SDK 驗證指紋：
 
 ```powershell
-.\FFBInterceptor.Launcher.exe --offline-only --game "C:\Games\Example\game.exe" --
+simhub\tools\Test-SimHubSdk.ps1 -SimHubInstallPath 'C:\Program Files (x86)\SimHub'
+simhub\tools\Build-SimHubPackage.ps1
+simhub\tools\Build-LauncherPackage.ps1
 ```
 
-啟動器會在子處理程序第一條入口點指令執行前完成同步，只載入固定的同層 Hook，還原暫時
-放置於記憶體的同步斷點，只替換尚未被修改的
-`dinput8.dll!DirectInput8Create` IAT 指標，完成後解除偵錯關係。它不會修改遊戲
-EXE，也不會修改遊戲資料夾內的任何 DLL。
-
-Proxy DLL 與啟動器 Hook 共用同一套攔截核心。Proxy DLL 的 ANSI／Wide COM 介面共用
-控制區塊；跨介面的 `QueryInterface(IUnknown)`、`AddRef` 與 `Release` 會維持相同的
-identity 與 reference count，aggregation 與未知介面則原樣轉送。
-
-## 執行 Python 檢視器
-
-需求為 Windows x64、Python 3.12+ 與 [uv](https://docs.astral.sh/uv/)：
+獨立 Python viewer 需求為 Python 3.12+ 與 [uv](https://docs.astral.sh/uv/)：
 
 ```powershell
 cd viewer
-uv sync --extra dev
+uv sync --locked --extra dev
 uv run ffb-viewer
 ```
 
-檢視器會建立可供多個來源連線的具名管道（Named Pipe）
-`\\.\pipe\ffb-interceptor-v1`。除非使用者主動按下匯出功能，資料只會留在記憶體。
-介面提供資料來源／裝置／效果篩選、1／5／10／30 秒時間範圍、通道與 Condition 軸選擇、
-暫停及事件標記，並以容量受限的循環緩衝區保留近期資料。
+協定、資料處理與安全細節見 [Protocol v1](docs/protocol-v1.md)、
+[安全模型](docs/security-model.md)、[trace 格式](docs/trace-format.md) 與
+[SECURITY.md](SECURITY.md)。
 
-通道選擇器會顯示已觀察到的 Constant、Ramp、Periodic 參數，以及 Condition 的
-offset、coefficient、saturation、deadband。缺少的參數會顯示為沒有樣本，不會合成
-不存在的力值。`Export CSV`、`Export PNG` 與 `Save .ffbtrace` 都是使用者主動
-操作。版本化 trace 只含相對時間、處理程序內穩定 ID 與已遮罩的命令欄位，不會儲存完整
-路徑、序號、帳號或主機名稱。
+## 授權
 
-CSV 另含長度受限的資料來源執行檔名稱與處理程序 ID，讓同時選取多個來源時仍能辨識
-裝置／效果 ID。原始詳細資料面板只顯示最後一筆選取命令，不會虛構 Condition 力值。
-
-## 建置與使用 SimHub 外掛
-
-SimHub 外掛與 Python 檢視器可以同時運作。Proxy DLL 或啟動器 Hook 會寫入兩個互相獨立
-的接收端：既有的 `\\.\pipe\ffb-interceptor-v1` 檢視器具名管道，以及
-`\\.\pipe\ffb-interceptor-simhub-v1`。每個接收端都有自己的固定大小佇列、
-傳送工作、丟棄統計與重新連線路徑，因此單一接收端停滯不會反向拖慢另一端。
-
-多執行緒 DirectInput 呼叫會依嚴格遞增的序號送往兩端；SimHub 會拒絕重複或倒退的
-封包。遊戲失去焦點並成功 `Unacquire`，或回報 acquisition loss 時，也會停止舊的
-效果狀態，避免殘留資料造成假削峰。
-
-已安裝 SimHub 時，可使用本機 SDK 建置與封裝外掛：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File simhub\tools\Build-SimHubPackage.ps1
-```
-
-這會產生不納入 Git 的 `simhub/dist/FFBInterceptor-SimHub-0.2.0.zip`，而且不會重新
-散布 SimHub 組件（assemblies）。套件內含兩個專案 DLL、800×480 儀表板、480×160
-高對比覆疊顯示（Overlay），以及台灣繁體中文安裝說明。詳見
-[SimHub 外掛說明](simhub/README.md)。
-
-完成兩個架構的啟動器／Hook 建置後，可產生建議使用的不改遊戲 DLL 可攜式套件：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File simhub\tools\Build-LauncherPackage.ps1
-```
-
-輸出為 `simhub/dist/FFBInterceptor-Launcher-0.2.0.zip`。解壓縮後執行
-`Start-FFBInterceptor.cmd`：第一次會安裝 SimHub 外掛並開啟 SimHub，之後則讓
-使用者選擇並啟動離線遊戲。套件採明確允許清單（allowlist）與 SHA-256 雜湊清單
-（manifest），不含
-`dinput8.dll`。生命週期測試會驗證首次安裝、同版本重複執行、不同版本拒絕、同名
-目錄拒絕、檔案遭修改時拒絕，以及正常解除安裝後還原原檔。
-
-傳統 Proxy DLL 型可攜式套件仍可用下列命令建置：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File simhub\tools\Build-ReadyToUsePackage.ps1
-```
-
-輸出為 `simhub/dist/FFBInterceptor-ReadyToUse-0.2.0.zip`。使用者解壓縮後執行
-`Install-FFBInterceptor.cmd`，安裝器會要求選取遊戲 EXE、自動判斷 x86／x64、
-備份既有 `dinput8.dll`、安裝 SimHub 外掛，並開啟兩個儀表板匯入檔。配套的
-解除安裝器會驗證已安裝檔案的雜湊後才還原備份。詳見
-[傳統 Proxy DLL 可攜版操作說明](simhub/PORTABLE.zh-TW.md)。
-
-削峰偵測預設在命令值達 98% 時進入候選狀態，低於 95% 時準備解除；連續飽和
-100 ms，或最近 1 秒內有 5% 的時間飽和，就會觸發削峰，低於 95% 持續 500 ms 後
-解除。這是 `DI_FFNOMINALMAX` 的 DirectInput 命令飽和判定，不代表馬達的實際扭力。
-Constant、Ramp 與 Periodic 效果可參與判定。Condition 與 Custom 效果仍會計數，但
-不納入削峰結論，因為只靠目前參數無法還原它們的實際出力。
-
-外掛提供設定頁、SimHub properties、削峰開始／結束事件、跨資料來源的
-`AnyClipping`，以及 800×480 儀表板與 480×160 高對比覆疊顯示。
-
-## 通訊協定
-
-Protocol v1 使用明確的小端序（little-endian）32 位元組標頭，以及不含指標、長度
-受限的承載資料（payload）。每個訊框（frame）上限為 64 KiB、最多八個軸。未知或
-自訂效果只攜帶 GUID、宣告長度，以及是否已遮罩／截短的旗標。詳見
-[Protocol v1](docs/protocol-v1.md)、[安全模型](docs/security-model.md) 與
-[trace 格式](docs/trace-format.md)。
-
-## 驗證與發行來源
-
-Windows CI 矩陣會建置並測試 x86／x64 Proxy DLL 與啟動器／Hook、Python 3.12／3.13、
-net48 削峰核心，以及兩個儀表板結構描述（schema）。合成效能門檻要求 telemetry
-queue hot path 在每秒 1,000+ 事件下 p99 小於 100 微秒、具名管道 ingestion 在相同
-事件率下 p99 小於 5 毫秒，Qt 更新路徑則必須在 60 Hz 計時器運作時保有 30 FPS 的
-畫面更新預算。
-
-具名管道測試會使用實際 current-user DACL、分段寫入、重新連線與核心回報的 Hello PID
-驗證。安全工作流程另以 gitleaks 掃描完整 Git 歷史，並用 actionlint 與 zizmor 檢查
-所有 GitHub Actions workflow。
-
-正式發行只能從既有的 `vX.Y.Z` tag 建置。CI 會 checkout 該 tag，再核對 tag commit、
-CMake 專案版本與 Python 檢視器版本，最後才建置、封存並產生建置來源證明
-（provenance attestation）。詳見 [發行流程](docs/release-process.md)。
-
-## 貢獻方式與授權
-
-請參考 [CONTRIBUTING.md](CONTRIBUTING.md)、[SECURITY.md](SECURITY.md) 與
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。本專案依
-[GNU GPLv3](LICENSE) 授權發行。上游聲明保留於
-[`licenses/upstream-dcs-force-feedback-fix-MIT.txt`](licenses/upstream-dcs-force-feedback-fix-MIT.txt)
-及 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
-
-## 目前狀態
-
-v0.2.0 是預發行版本，標示為 **UNSIGNED EXPERIMENTAL（未經數位簽章的實驗版）**。發行門檻
-以合成的通訊協定與佇列測試為主。除非附有明確授權及可重現證據，實體硬體或商業遊戲
-測試結果都不代表本專案做出相容性保證。
+本專案依 [GNU GPLv3](LICENSE) 發行。上游 MIT 聲明與其他第三方資訊保留於
+[上游授權檔](licenses/upstream-dcs-force-feedback-fix-MIT.txt) 與
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。貢獻前請閱讀
+[CONTRIBUTING.md](CONTRIBUTING.md) 與 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。

@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-only
+self-hosted-runner:
+  labels:
+    - simhub-sdk
+    - ephemeral

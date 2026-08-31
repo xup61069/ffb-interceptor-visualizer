@@ -1,0 +1,16 @@
+{
+  "check_runs": [
+    {
+      "name": "proxy-x64",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-08-30T00:00:00Z"
+    },
+    {
+      "name": "codeql-cpp",
+      "status": "completed",
+      "conclusion": "success",
+      "started_at": "2026-08-30T00:00:01Z"
+    }
+  ]
+}

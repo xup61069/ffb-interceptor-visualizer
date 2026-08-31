@@ -75,6 +75,17 @@ struct TestImage {
             base + kAddressesRva);
         return reinterpret_cast<void*>(addresses[0].u1.Function);
     }
+
+    void use_ordinal(WORD ordinal) {
+        auto* lookup = reinterpret_cast<IMAGE_THUNK_DATA*>(base + kLookupRva);
+        lookup[0].u1.Ordinal = IMAGE_ORDINAL_FLAG | ordinal;
+    }
+
+    void use_address(void* address) {
+        auto* addresses = reinterpret_cast<IMAGE_THUNK_DATA*>(
+            base + kAddressesRva);
+        addresses[0].u1.Function = reinterpret_cast<ULONG_PTR>(address);
+    }
 };
 
 }  // namespace
@@ -104,6 +115,38 @@ int main() {
                reinterpret_cast<void*>(&original_create),
                reinterpret_cast<void*>(&replacement_create)) == 1);
     assert(pointer_fallback.address() ==
+           reinterpret_cast<void*>(&replacement_create));
+
+    // The Microsoft dinput8 import library can identify DirectInput8Create by
+    // its dinput8 ordinal (1) instead of by name.
+    TestImage ordinal_import;
+    ordinal_import.use_ordinal(1);
+    assert(ffb::patch_direct_input8_imports(
+               reinterpret_cast<HMODULE>(ordinal_import.base),
+               reinterpret_cast<void*>(&original_create),
+               reinterpret_cast<void*>(&replacement_create)) == 1);
+    assert(ordinal_import.address() ==
+           reinterpret_cast<void*>(&replacement_create));
+
+    TestImage unrelated_ordinal;
+    unrelated_ordinal.use_ordinal(2);
+    assert(ffb::patch_direct_input8_imports(
+               reinterpret_cast<HMODULE>(unrelated_ordinal.base),
+               reinterpret_cast<void*>(&original_create),
+               reinterpret_cast<void*>(&replacement_create)) == 0);
+    assert(unrelated_ordinal.address() ==
+           reinterpret_cast<void*>(&original_create));
+
+    // Even ordinal 1 is not eligible if another component already changed the
+    // live IAT entry away from the resolved System32 function.
+    TestImage changed_ordinal;
+    changed_ordinal.use_ordinal(1);
+    changed_ordinal.use_address(reinterpret_cast<void*>(&replacement_create));
+    assert(ffb::patch_direct_input8_imports(
+               reinterpret_cast<HMODULE>(changed_ordinal.base),
+               reinterpret_cast<void*>(&original_create),
+               reinterpret_cast<void*>(&replacement_create)) == 0);
+    assert(changed_ordinal.address() ==
            reinterpret_cast<void*>(&replacement_create));
 
     TestImage unrelated_library;

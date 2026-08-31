@@ -14,6 +14,59 @@ function Get-FFBFileSha256 {
     finally { $sha256.Dispose(); $stream.Dispose() }
 }
 
+function Assert-FFBPackageManifest {
+    param([Parameter(Mandatory = $true)][string]$BundleRoot)
+    $root = Get-FFBNormalizedLocalPath -Path $BundleRoot
+    $manifest = Join-Path $root 'SHA256SUMS.txt'
+    if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) {
+        throw "Package manifest is missing: $manifest"
+    }
+    $manifestItem = Get-Item -LiteralPath $manifest -Force
+    if (($manifestItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+        $manifestItem.Length -gt 1048576) {
+        throw 'Package manifest is unsafe or too large.'
+    }
+    $expected = @{}
+    foreach ($line in [IO.File]::ReadAllLines($manifest, [Text.Encoding]::UTF8)) {
+        if ($line -notmatch '^([A-Fa-f0-9]{64})  (.+)$') { throw "Invalid package manifest line: $line" }
+        $relative = $Matches[2].Replace('/', '\')
+        if ([IO.Path]::IsPathRooted($relative) -or $relative.Contains(':')) {
+            throw "Unsafe package manifest path: $relative"
+        }
+        $segments = @($relative -split '\\')
+        if ($segments.Count -eq 0 -or @($segments | Where-Object {
+            [string]::IsNullOrWhiteSpace($_) -or $_ -eq '.' -or $_ -eq '..' -or
+            $_.EndsWith('.') -or $_.EndsWith(' ')
+        }).Count -gt 0) { throw "Non-canonical package manifest path: $relative" }
+        $key = $relative.ToLowerInvariant()
+        if ($expected.ContainsKey($key) -or $expected.Count -ge 128) {
+            throw "Duplicate or excessive package manifest entry: $relative"
+        }
+        $candidate = [IO.Path]::GetFullPath((Join-Path $root $relative))
+        if (-not (Test-FFBPathWithinOrEqual -Path $candidate -Parent $root)) {
+            throw "Package manifest entry escapes the package: $relative"
+        }
+        $expected[$key] = [pscustomobject]@{ Path = $candidate; Hash = $Matches[1].ToUpperInvariant() }
+    }
+    $actualFiles = @(Get-ChildItem -LiteralPath $root -File -Recurse -Force |
+        Where-Object { -not (Test-FFBPathEqual -Left $_.FullName -Right $manifest) })
+    if ($actualFiles.Count -ne $expected.Count) {
+        throw 'Package manifest does not cover the exact extracted file set.'
+    }
+    foreach ($file in $actualFiles) {
+        if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Package file cannot be a reparse point: $($file.FullName)"
+        }
+        $relative = $file.FullName.Substring($root.Length + 1).ToLowerInvariant()
+        $record = $expected[$relative]
+        if ($null -eq $record -or -not (Test-FFBPathEqual -Left $record.Path -Right $file.FullName) -or
+            (Get-FFBFileSha256 -Path $file.FullName) -cne $record.Hash) {
+            throw "Package manifest verification failed: $($file.FullName)"
+        }
+    }
+    return $true
+}
+
 function Get-FFBStateDirectory {
     if ($env:FFB_INTERCEPTOR_PACKAGE_TEST -eq '1' -and
         -not [string]::IsNullOrWhiteSpace($env:FFB_INTERCEPTOR_TEST_STATE_DIRECTORY)) {
@@ -66,6 +119,385 @@ function Test-FFBPathEqual {
         [Parameter(Mandatory = $true)][string]$Right
     )
     return $Left.Equals($Right, [StringComparison]::OrdinalIgnoreCase)
+}
+
+if ($null -eq ('FFBInterceptor.DirectoryMutationLock' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
+using Microsoft.Win32.SafeHandles;
+
+namespace FFBInterceptor
+{
+    public static class DirectoryMutationLock
+    {
+        private const uint FileReadAttributes = 0x00000080;
+        private const uint DeleteAccess = 0x00010000;
+        private const uint FileShareRead = 0x00000001;
+        private const uint FileShareWrite = 0x00000002;
+        private const uint OpenExisting = 3;
+        private const uint CreateNew = 1;
+        private const uint FileAttributeDirectory = 0x00000010;
+        private const uint FileAttributeReparsePoint = 0x00000400;
+        private const uint FileAttributeTemporary = 0x00000100;
+        private const uint FileFlagDeleteOnClose = 0x04000000;
+        private const uint FileFlagOpenReparsePoint = 0x00200000;
+        private const uint FileFlagBackupSemantics = 0x02000000;
+        private const uint DriveFixed = 3;
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ByHandleFileInformation
+        {
+            internal uint FileAttributes;
+            internal System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+            internal System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+            internal System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+            internal uint VolumeSerialNumber;
+            internal uint FileSizeHigh;
+            internal uint FileSizeLow;
+            internal uint NumberOfLinks;
+            internal uint FileIndexHigh;
+            internal uint FileIndexLow;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern SafeFileHandle CreateFileW(
+            string fileName,
+            uint desiredAccess,
+            uint shareMode,
+            IntPtr securityAttributes,
+            uint creationDisposition,
+            uint flagsAndAttributes,
+            IntPtr templateFile);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetFileInformationByHandle(
+            SafeFileHandle file,
+            out ByHandleFileInformation information);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint GetFinalPathNameByHandleW(
+            SafeFileHandle file,
+            StringBuilder filePath,
+            uint filePathLength,
+            uint flags);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+        private static extern uint GetDriveTypeW(string rootPathName);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint QueryDosDeviceW(
+            string deviceName,
+            StringBuilder targetPath,
+            int maximumSize);
+
+        public static string GetStableFixedDriveTarget(string driveRoot)
+        {
+            if (String.IsNullOrWhiteSpace(driveRoot) || driveRoot.Length < 2 ||
+                driveRoot[1] != ':')
+                throw new InvalidOperationException("Path is not rooted on a DOS drive");
+            if (GetDriveTypeW(driveRoot) != DriveFixed)
+                throw new InvalidOperationException(
+                    "SimHub must be installed on a fixed local drive");
+
+            StringBuilder target = new StringBuilder(32768);
+            if (QueryDosDeviceW(driveRoot.Substring(0, 2), target, target.Capacity) == 0)
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(), "Unable to resolve the SimHub drive");
+
+            string value = target.ToString();
+            if (!IsPhysicalVolumeDeviceName(value))
+                throw new InvalidOperationException(
+                    "SimHub drive is not backed by a stable physical volume");
+            return value;
+        }
+
+        public static bool IsPhysicalVolumeDeviceName(string target)
+        {
+            return !String.IsNullOrWhiteSpace(target) && Regex.IsMatch(
+                target,
+                @"^\\Device\\HarddiskVolume[0-9]+$",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        public static SafeFileHandle OpenDirectory(string path)
+        {
+            SafeFileHandle handle = CreateFileW(
+                path,
+                FileReadAttributes,
+                FileShareRead | FileShareWrite,
+                IntPtr.Zero,
+                OpenExisting,
+                FileFlagBackupSemantics | FileFlagOpenReparsePoint,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                int error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new Win32Exception(error, "Unable to lock directory");
+            }
+
+            try
+            {
+                ByHandleFileInformation information;
+                if (!GetFileInformationByHandle(handle, out information))
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(), "Unable to inspect locked directory");
+                if ((information.FileAttributes & FileAttributeDirectory) == 0)
+                    throw new InvalidOperationException("Locked path is not a directory");
+                if ((information.FileAttributes & FileAttributeReparsePoint) != 0)
+                    throw new InvalidOperationException("Locked directory is a reparse point");
+                return handle;
+            }
+            catch
+            {
+                handle.Dispose();
+                throw;
+            }
+        }
+
+        public static string GetIdentity(SafeFileHandle handle)
+        {
+            ByHandleFileInformation information;
+            if (handle == null || handle.IsInvalid ||
+                !GetFileInformationByHandle(handle, out information))
+                throw new Win32Exception(
+                    Marshal.GetLastWin32Error(), "Unable to identify locked directory");
+            return String.Format("{0:X8}:{1:X8}:{2:X8}",
+                information.VolumeSerialNumber,
+                information.FileIndexHigh,
+                information.FileIndexLow);
+        }
+
+        public static SafeFileHandle OpenMutationSentinel(string path)
+        {
+            SafeFileHandle handle = CreateFileW(
+                path,
+                FileReadAttributes | DeleteAccess,
+                FileShareRead | FileShareWrite,
+                IntPtr.Zero,
+                CreateNew,
+                FileAttributeTemporary | FileFlagDeleteOnClose,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                int error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new Win32Exception(error, "Unable to create destination lock file");
+            }
+
+            try
+            {
+                StringBuilder finalPath = new StringBuilder(32768);
+                uint length = GetFinalPathNameByHandleW(
+                    handle, finalPath, (uint)finalPath.Capacity, 0);
+                if (length == 0 || length >= finalPath.Capacity)
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(), "Unable to resolve destination lock file");
+                string resolved = finalPath.ToString();
+                if (resolved.StartsWith("\\\\?\\", StringComparison.Ordinal))
+                    resolved = resolved.Substring(4);
+                string expected = System.IO.Path.GetFullPath(path);
+                if (!resolved.Equals(expected, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(
+                        "Destination lock file resolved outside the selected SimHub path");
+                return handle;
+            }
+            catch
+            {
+                handle.Dispose();
+                throw;
+            }
+        }
+
+        public static SafeFileHandle OpenMutationLease(string path)
+        {
+            SafeFileHandle handle = CreateFileW(
+                path,
+                FileReadAttributes | DeleteAccess,
+                0,
+                IntPtr.Zero,
+                CreateNew,
+                FileAttributeTemporary | FileFlagDeleteOnClose,
+                IntPtr.Zero);
+            if (handle.IsInvalid)
+            {
+                int error = Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new Win32Exception(
+                    error, "Another destination mutation is active or its lease is stale");
+            }
+
+            try
+            {
+                StringBuilder finalPath = new StringBuilder(32768);
+                uint length = GetFinalPathNameByHandleW(
+                    handle, finalPath, (uint)finalPath.Capacity, 0);
+                if (length == 0 || length >= finalPath.Capacity)
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(), "Unable to resolve destination mutation lease");
+                string resolved = finalPath.ToString();
+                if (resolved.StartsWith("\\\\?\\", StringComparison.Ordinal))
+                    resolved = resolved.Substring(4);
+                string expected = System.IO.Path.GetFullPath(path);
+                if (!resolved.Equals(expected, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException(
+                        "Destination mutation lease resolved outside the selected path");
+                return handle;
+            }
+            catch
+            {
+                handle.Dispose();
+                throw;
+            }
+        }
+    }
+}
+'@
+}
+
+function Exit-FFBSimHubMutationBoundary {
+    param($Boundary)
+    if ($null -eq $Boundary -or $null -eq $Boundary.Locks) { return }
+    for ($index = $Boundary.Locks.Count - 1; $index -ge 0; $index--) {
+        try { $Boundary.Locks[$index].Dispose() } catch { }
+    }
+}
+
+function Enter-FFBSimHubMutationBoundary {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [switch]$RequireExecutable,
+        [switch]$ReadOnly
+    )
+
+    $full = Get-FFBNormalizedLocalPath -Path $Path
+    $driveRoot = [IO.Path]::GetPathRoot($full)
+    if ([string]::IsNullOrWhiteSpace($driveRoot)) {
+        throw "The SimHub directory has no local drive root: $full"
+    }
+    try {
+        $driveTarget = [FFBInterceptor.DirectoryMutationLock]::GetStableFixedDriveTarget(
+            $driveRoot)
+    }
+    catch {
+        throw "Unable to establish a stable physical SimHub drive ($driveRoot): $($_.Exception.Message)"
+    }
+
+    $directories = New-Object System.Collections.ArrayList
+    [void]$directories.Add($driveRoot)
+    $current = $driveRoot
+    $relative = $full.Substring($driveRoot.Length)
+    foreach ($segment in @($relative -split '[\\/]')) {
+        if ([string]::IsNullOrEmpty($segment)) { continue }
+        $current = [IO.Path]::Combine($current, $segment)
+        [void]$directories.Add($current)
+    }
+
+    $locks = New-Object System.Collections.ArrayList
+    $directoryLocks = New-Object System.Collections.ArrayList
+    try {
+        foreach ($directory in $directories) {
+            try {
+                $handle = [FFBInterceptor.DirectoryMutationLock]::OpenDirectory(
+                    [string]$directory)
+            }
+            catch {
+                throw "Unable to lock a regular non-reparse SimHub path component ($directory): $($_.Exception.Message)"
+            }
+            [void]$locks.Add($handle)
+            [void]$directoryLocks.Add([pscustomobject]@{
+                Path = [string]$directory
+                Handle = $handle
+                Identity = [FFBInterceptor.DirectoryMutationLock]::GetIdentity($handle)
+            })
+        }
+
+        # Real mutations add a unique delete-on-close child handle. A WhatIf
+        # validation deliberately remains read-only. The identity checks
+        # below still detect any component swapped while the validation
+        # handles were being acquired; no path is mutated afterwards.
+        if (-not $ReadOnly) {
+            # A fixed, zero-share delete-on-close lease serializes real
+            # mutations across processes and logon sessions. A stale or
+            # attacker-created lease fails closed. The unique sentinel remains
+            # separate because it anchors ancestor rename protection.
+            $leasePath = Join-Path $full '.ffb-interceptor-mutation.lock'
+            $lease = [FFBInterceptor.DirectoryMutationLock]::OpenMutationLease(
+                $leasePath)
+            [void]$locks.Add($lease)
+            $sentinelPath = Join-Path $full (
+                '.ffb-interceptor-mutation-' + [Guid]::NewGuid().ToString('N') + '.lock')
+            $sentinel = [FFBInterceptor.DirectoryMutationLock]::OpenMutationSentinel(
+                $sentinelPath)
+            [void]$locks.Add($sentinel)
+        }
+        foreach ($lockedDirectory in $directoryLocks) {
+            $verificationHandle = $null
+            try {
+                $verificationHandle = [FFBInterceptor.DirectoryMutationLock]::OpenDirectory(
+                    [string]$lockedDirectory.Path)
+                $identity = [FFBInterceptor.DirectoryMutationLock]::GetIdentity(
+                    $verificationHandle)
+                if (-not ([string]$lockedDirectory.Identity).Equals($identity,
+                        [StringComparison]::Ordinal)) {
+                    throw "A SimHub path component changed while its destination was being locked: $($lockedDirectory.Path)"
+                }
+            }
+            finally {
+                if ($null -ne $verificationHandle) { $verificationHandle.Dispose() }
+            }
+        }
+
+        $verifiedDriveTarget = [FFBInterceptor.DirectoryMutationLock]::GetStableFixedDriveTarget(
+            $driveRoot)
+        if (-not $driveTarget.Equals($verifiedDriveTarget,
+                [StringComparison]::OrdinalIgnoreCase)) {
+            throw "The SimHub drive mapping changed while its destination was being locked: $driveRoot"
+        }
+
+        # For a real mutation, the delete-on-close child plus the directory
+        # handles keep the selected tree from being renamed into a junction
+        # between this validation and the elevated file mutations.
+        $verified = Assert-FFBSimHubRoot -Path $full `
+            -RequireExecutable:$RequireExecutable
+        return [pscustomobject]@{ Root = $verified; Locks = $locks }
+    }
+    catch {
+        Exit-FFBSimHubMutationBoundary -Boundary ([pscustomobject]@{ Locks = $locks })
+        throw
+    }
+}
+
+function Enter-FFBStateMutationBoundary {
+    param(
+        [switch]$AllowCreate,
+        [switch]$ReadOnly
+    )
+
+    $directory = Get-FFBStateDirectory
+    if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+        if (-not $AllowCreate -or $ReadOnly) {
+            throw "The protected plug-in state directory was not found: $directory"
+        }
+
+        # Creating the directory is the only operation performed before the
+        # boundary. If an untrusted process wins this race with a junction,
+        # the immediate OPEN_REPARSE_POINT validation below rejects it before
+        # ACL or file mutations occur.
+        [IO.Directory]::CreateDirectory($directory) | Out-Null
+    }
+
+    try {
+        return Enter-FFBSimHubMutationBoundary -Path $directory -ReadOnly:$ReadOnly
+    }
+    catch {
+        throw "Unable to secure the protected plug-in state directory ($directory): $($_.Exception.Message)"
+    }
 }
 
 function Get-FFBSimHubExecutablePath {
@@ -215,6 +647,50 @@ function Get-FFBAclIdentifiers {
     }
 }
 
+function Set-FFBDirectoryAclObject {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][Security.AccessControl.DirectorySecurity]$Security
+    )
+    $extensions = 'System.IO.FileSystemAclExtensions' -as [type]
+    if ($null -eq $extensions) {
+        [IO.Directory]::SetAccessControl($Path, $Security)
+        return
+    }
+    $method = @($extensions.GetMethods() | Where-Object {
+        $_.Name -eq 'SetAccessControl' -and $_.GetParameters().Count -eq 2 -and
+        $_.GetParameters()[0].ParameterType -eq [IO.DirectoryInfo]
+    })[0]
+    if ($null -eq $method) { throw 'Directory ACL support is unavailable.' }
+    try { [void]$method.Invoke($null, @([IO.DirectoryInfo]::new($Path), $Security)) }
+    catch {
+        if ($null -ne $_.Exception.InnerException) { throw $_.Exception.InnerException }
+        throw
+    }
+}
+
+function Set-FFBFileAclObject {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][Security.AccessControl.FileSecurity]$Security
+    )
+    $extensions = 'System.IO.FileSystemAclExtensions' -as [type]
+    if ($null -eq $extensions) {
+        [IO.File]::SetAccessControl($Path, $Security)
+        return
+    }
+    $method = @($extensions.GetMethods() | Where-Object {
+        $_.Name -eq 'SetAccessControl' -and $_.GetParameters().Count -eq 2 -and
+        $_.GetParameters()[0].ParameterType -eq [IO.FileInfo]
+    })[0]
+    if ($null -eq $method) { throw 'File ACL support is unavailable.' }
+    try { [void]$method.Invoke($null, @([IO.FileInfo]::new($Path), $Security)) }
+    catch {
+        if ($null -ne $_.Exception.InnerException) { throw $_.Exception.InnerException }
+        throw
+    }
+}
+
 function Set-FFBProtectedDirectoryAcl {
     param([Parameter(Mandatory = $true)][string]$Path)
     $isAdministrator = Test-FFBAdministrator
@@ -251,7 +727,7 @@ function Set-FFBProtectedDirectoryAcl {
     $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
         $ids.Users, [Security.AccessControl.FileSystemRights]::ReadAndExecute,
         $inheritance, $none, $allow))
-    [IO.Directory]::SetAccessControl($Path, $security)
+    Set-FFBDirectoryAclObject -Path $Path -Security $security
 }
 
 function Set-FFBProtectedFileAcl {
@@ -276,7 +752,7 @@ function Set-FFBProtectedFileAcl {
     }
     $security.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new(
         $ids.Users, [Security.AccessControl.FileSystemRights]::ReadAndExecute, $allow))
-    [IO.File]::SetAccessControl($Path, $security)
+    Set-FFBFileAclObject -Path $Path -Security $security
 }
 
 function Test-FFBProtectedAcl {
@@ -289,7 +765,7 @@ function Test-FFBProtectedAcl {
         if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
             ($Kind -eq 'File' -and $item.PSIsContainer) -or
             ($Kind -eq 'Directory' -and -not $item.PSIsContainer)) { return $false }
-        $security = if ($Kind -eq 'File') { [IO.File]::GetAccessControl($Path) } else { [IO.Directory]::GetAccessControl($Path) }
+        $security = Get-Acl -LiteralPath $Path
         if (-not $security.AreAccessRulesProtected) { return $false }
         $ids = Get-FFBAclIdentifiers
         $isolatedTest = $env:FFB_INTERCEPTOR_PACKAGE_TEST -eq '1'
@@ -343,15 +819,24 @@ function Save-FFBPluginState {
     $validated = Assert-FFBPluginState -State $State -RequireSimHubExecutable
     $directory = Get-FFBStateDirectory
     $path = Get-FFBStatePath
-    if (Test-Path -LiteralPath $path) { throw "Refusing to overwrite existing plug-in state: $path" }
-    Set-FFBProtectedDirectoryAcl -Path $directory
-    $temporary = Join-Path $directory ('.simhub-plugin-state-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    $stateBoundary = $null
+    $temporary = ''
     try {
+        $stateBoundary = Enter-FFBStateMutationBoundary -AllowCreate
+        if (Test-Path -LiteralPath $path) {
+            throw "Refusing to overwrite existing plug-in state: $path"
+        }
+        Set-FFBProtectedDirectoryAcl -Path $directory
+        $temporary = Join-Path $directory ('.simhub-plugin-state-' + [Guid]::NewGuid().ToString('N') + '.tmp')
         [IO.File]::WriteAllText($temporary, ($validated | ConvertTo-Json -Depth 6), [Text.UTF8Encoding]::new($false))
         Set-FFBProtectedFileAcl -Path $temporary
         [IO.File]::Move($temporary, $path)
     }
     finally {
-        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+        if (-not [string]::IsNullOrWhiteSpace($temporary) -and
+            (Test-Path -LiteralPath $temporary)) {
+            Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+        }
+        Exit-FFBSimHubMutationBoundary -Boundary $stateBoundary
     }
 }

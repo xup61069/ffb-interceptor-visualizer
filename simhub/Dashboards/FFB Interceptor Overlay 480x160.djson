@@ -47,7 +47,7 @@
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
           "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "SemiBold", "FontSize": 13.0,
-          "Text": "FFB COMMAND", "TextColor": "#FFABB5C0", "HorizontalAlignment": 0,
+          "Text": "FFB 保守合併命令", "TextColor": "#FFABB5C0", "HorizontalAlignment": 0,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 24.0, "Left": 23.0, "Top": 14.0, "Visible": true, "Width": 125.0,
           "Name": "Title", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0
@@ -55,11 +55,11 @@
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
           "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Bold", "FontSize": 27.0,
-          "Text": "HEADROOM", "TextColor": "#FFFFFFFF", "HorizontalAlignment": 0,
+          "Text": "有餘裕", "TextColor": "#FFFFFFFF", "HorizontalAlignment": 0,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 44.0, "Left": 23.0, "Top": 37.0, "Visible": true, "Width": 150.0,
           "Name": "State word", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 16.0,
-          "Bindings": { "Text": { "Formula": { "Expression": "if([FFBInterceptor.Connected],if([FFBInterceptor.DataReliable],if([FFBInterceptor.IsClipping],'CLIP',if([FFBInterceptor.AtLimit],'LIMIT','HEADROOM')),'DATA GAP'),'WAIT')" }, "Mode": 2 } }
+          "Bindings": { "Text": { "Formula": { "Expression": "if([FFBInterceptor.Connected],if([FFBInterceptor.DataReliable],if([FFBInterceptor.IsClipping],'削峰',if([FFBInterceptor.AtLimit],'達上限','有餘裕')),'模型受限'),'等待')" }, "Mode": 2 } }
         },
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.LinearGaugeItem, SimHub.Plugins",
@@ -71,7 +71,7 @@
           "Height": 30.0, "Left": 176.0, "Top": 27.0, "Visible": true, "Width": 282.0,
           "Name": "Command gauge", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 16.0,
           "Bindings": {
-            "Value": { "Formula": { "Expression": "[FFBInterceptor.CommandPercent]" }, "Mode": 2 },
+            "Value": { "Formula": { "Expression": "[FFBInterceptor.CombinedCommandPercent]" }, "Mode": 2 },
             "GaugeColor": {
               "Formula": { "Expression": "if([FFBInterceptor.Connected],if([FFBInterceptor.DataReliable],if([FFBInterceptor.IsClipping],1,if([FFBInterceptor.AtLimit],0.5,0)),0.5),0)" },
               "StartColor": "#FF64D3A3", "EnableMiddleColor": true, "MiddleColor": "#FFFFC107",
@@ -94,12 +94,12 @@
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 46.0, "Left": 176.0, "Top": 65.0, "Visible": true, "Width": 125.0,
           "Name": "Command value", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 16.0,
-          "Bindings": { "Text": { "FormatString": "0.0\\%", "Formula": { "Expression": "[FFBInterceptor.CommandPercent]" }, "Mode": 2 } }
+          "Bindings": { "Text": { "FormatString": "0.0\\%", "Formula": { "Expression": "[FFBInterceptor.UnclampedCombinedCommandPercent]" }, "Mode": 2 } }
         },
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
           "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "SemiBold", "FontSize": 12.0,
-          "Text": "CLIP 1S", "TextColor": "#FF9FAAB6", "HorizontalAlignment": 0,
+          "Text": "削峰 1 秒", "TextColor": "#FF9FAAB6", "HorizontalAlignment": 0,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 20.0, "Left": 315.0, "Top": 68.0, "Visible": true, "Width": 65.0,
           "Name": "Ratio label", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 100.0,
@@ -117,16 +117,16 @@
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
           "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Normal", "FontSize": 12.0,
-          "Text": "等待 DirectInput 遙測", "TextColor": "#FF9FAAB6", "HorizontalAlignment": 0,
+          "Text": "等待可靠資料", "TextColor": "#FF9FAAB6", "HorizontalAlignment": 0,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 25.0, "Left": 23.0, "Top": 112.0, "Visible": true, "Width": 260.0,
-          "Name": "Source", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 100.0,
-          "Bindings": { "Text": { "Formula": { "Expression": "[FFBInterceptor.SelectedProcessName]" }, "Mode": 2 } }
+          "Name": "可靠性", "RenderingSkip": 2, "MinimumRefreshIntervalMS": 100.0,
+          "Bindings": { "Text": { "Formula": { "Expression": "[FFBInterceptor.ReliabilityText]" }, "Mode": 2 } }
         },
         {
           "$type": "SimHub.Plugins.OutputPlugins.GraphicalDash.Models.TextItem, SimHub.Plugins",
           "IsTextItem": true, "Font": "Segoe UI", "FontWeight": "Normal", "FontSize": 11.0,
-          "Text": "COMMAND · NOT MOTOR TORQUE", "TextColor": "#FF77838F", "HorizontalAlignment": 2,
+          "Text": "保守上界 · 非實際馬達扭力", "TextColor": "#FF77838F", "HorizontalAlignment": 2,
           "VerticalAlignment": 1, "BackgroundColor": "#00FFFFFF",
           "Height": 23.0, "Left": 267.0, "Top": 114.0, "Visible": true, "Width": 191.0,
           "Name": "Definition", "RenderingSkip": 0, "MinimumRefreshIntervalMS": 0.0
@@ -148,9 +148,9 @@
     "ScreenCount": 1.0, "InGameScreensIndexs": [0], "IdleScreensIndexs": [0],
     "MainPreviewIndex": 0, "IsOverlay": true, "OverlaySizeWarning": false,
     "MetadataVersion": 2.0, "EnableOnDashboardMessaging": true, "PitScreensIndexs": [0],
-    "SimHubVersion": "9.11.22", "Category": "Force Feedback", "Title": "FFB Interceptor Overlay 480x160",
-    "Description": "High-contrast DirectInput command clipping overlay", "Author": "FFB Interceptor contributors",
-    "Width": 480.0, "Height": 160.0, "DashboardVersion": "1.0.0"
+    "SimHubVersion": "9.11.22", "Category": "力回饋", "Title": "FFB Interceptor Overlay 480x160",
+    "Description": "高對比 DirectInput 同裝置多效果保守合併命令削峰浮動視窗", "Author": "FFB Interceptor contributors",
+    "Width": 480.0, "Height": 160.0, "DashboardVersion": "1.1.0"
   },
   "ShowOnScreenControls": true,
   "IsOverlay": true,

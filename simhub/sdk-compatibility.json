@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "simHubVersion": "9.11.22",
+      "testedOn": "2026-08-30",
+      "files": [
+        {
+          "name": "GameReaderCommon.dll",
+          "length": 388248,
+          "sha256": "7A5EE7BA3D81B5DC373EA81C28967B06F5CC1CDF32D375DDA33EDEA9137A719F"
+        },
+        {
+          "name": "log4net.dll",
+          "length": 270336,
+          "sha256": "1D45A6AFA38F0B10814063F2A42E6EFCE45752853667650E765844B8566B3332"
+        },
+        {
+          "name": "SimHub.Logging.dll",
+          "length": 14488,
+          "sha256": "35FDD0CE83D0B0124B634849C186E200F20EA553EA0C9EBECF8651FAF3C69293"
+        },
+        {
+          "name": "SimHub.Plugins.dll",
+          "length": 9472664,
+          "sha256": "F36D1930270089F6E8AC3B909D2B0A75A9A40EB22AC75ED551FD8831373D16EF"
+        }
+      ]
+    }
+  ]
+}

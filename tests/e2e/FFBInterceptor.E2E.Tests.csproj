@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <Nullable>disable</Nullable>
+    <Deterministic>true</Deterministic>
+    <AssemblyName>FFBInterceptor.E2E.Tests</AssemblyName>
+    <RootNamespace>FFBInterceptor.E2E.Tests</RootNamespace>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\simhub\FFBInterceptor.Core\FFBInterceptor.Core.csproj" />
+  </ItemGroup>
+</Project>

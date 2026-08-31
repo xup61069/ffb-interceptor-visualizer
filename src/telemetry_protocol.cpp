@@ -277,7 +277,18 @@ std::vector<std::uint8_t> serialize_event(const Event& event) {
     put_u16(frame, kProtocolVersion);
     put_u16(frame, static_cast<std::uint16_t>(event.type));
     put_u32(frame, static_cast<std::uint32_t>(32 + payload.size()));
-    put_u32(frame, event.flags);
+    std::uint32_t wire_flags = event.flags;
+    if (event.type == MessageType::EffectCreated) {
+        wire_flags &= ~kEffectCreatedParametersPresenceMask;
+        if (event.effect_parameter_presence ==
+            EffectParameterPresence::Absent) {
+            wire_flags |= kEffectCreatedParametersAbsentFlag;
+        } else if (event.effect_parameter_presence ==
+                   EffectParameterPresence::Present) {
+            wire_flags |= kEffectCreatedParametersPresentFlag;
+        }
+    }
+    put_u32(frame, wire_flags);
     put_u64(frame, event.sequence);
     put_u64(frame, event.qpc_ticks);
     frame.insert(frame.end(), payload.begin(), payload.end());

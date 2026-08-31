@@ -7,11 +7,16 @@ param(
     [string]$HookX64Path = '',
     [string]$LauncherX86Path = '',
     [string]$HookX86Path = '',
-    [string]$OutputDirectory = ''
+    [string]$ManagerX64Path = '',
+    [string]$OutputDirectory = '',
+    [string]$SigningCertificateThumbprint = $env:FFB_SIGNING_CERT_SHA1,
+    [string]$TimestampUrl = 'http://timestamp.digicert.com',
+    [switch]$RequireSigning
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'ArchiveHelpers.ps1')
 
 function Resolve-RequiredFile {
     param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$Description)
@@ -29,6 +34,32 @@ function Assert-ChildPath {
     return $fullChild
 }
 
+function Assert-StableManagerSignature {
+    param(
+        [Parameter(Mandatory = $true)][string]$ManagerPath,
+        [Parameter(Mandatory = $true)][string]$ExpectedSigner
+    )
+
+    if ($ExpectedSigner -cnotmatch '^[A-F0-9]{64}$') {
+        throw 'Stable Manager build-policy signer is invalid.'
+    }
+    $resolvedManager = Resolve-RequiredFile -Path $ManagerPath -Description 'signed stable Manager'
+
+    $signature = Get-AuthenticodeSignature -LiteralPath $resolvedManager
+    if ($signature.Status -ne [Management.Automation.SignatureStatus]::Valid -or -not $signature.SignerCertificate) {
+        throw "Stable Manager Authenticode signature is not valid: $($signature.StatusMessage)"
+    }
+    $sha256Algorithm = [Security.Cryptography.SHA256]::Create()
+    try {
+        $actualSigner = ([BitConverter]::ToString(
+            $sha256Algorithm.ComputeHash($signature.SignerCertificate.RawData))).Replace('-', '')
+    }
+    finally { $sha256Algorithm.Dispose() }
+    if ($actualSigner -cne $ExpectedSigner) {
+        throw 'Stable Manager build-policy signer does not match its Authenticode signer certificate.'
+    }
+}
+
 $simHubRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $simHubRoot '..'))
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { $OutputDirectory = Join-Path $simHubRoot 'dist' }
@@ -44,11 +75,13 @@ if (-not $LauncherX64Path) { $LauncherX64Path = Join-Path $repositoryRoot 'build
 if (-not $HookX64Path) { $HookX64Path = Join-Path $repositoryRoot 'build\x64-release\FFBInterceptor.Hook.dll' }
 if (-not $LauncherX86Path) { $LauncherX86Path = Join-Path $repositoryRoot 'build\x86-release\FFBInterceptor.Launcher.exe' }
 if (-not $HookX86Path) { $HookX86Path = Join-Path $repositoryRoot 'build\x86-release\FFBInterceptor.Hook.dll' }
+if (-not $ManagerX64Path) { $ManagerX64Path = Join-Path $repositoryRoot 'build\x64-release\FFBInterceptor.Manager.exe' }
 
 $launcherX64 = Resolve-RequiredFile -Path $LauncherX64Path -Description 'x64 launcher'
 $hookX64 = Resolve-RequiredFile -Path $HookX64Path -Description 'x64 hook DLL'
 $launcherX86 = Resolve-RequiredFile -Path $LauncherX86Path -Description 'x86 launcher'
 $hookX86 = Resolve-RequiredFile -Path $HookX86Path -Description 'x86 hook DLL'
+$managerX64 = Resolve-RequiredFile -Path $ManagerX64Path -Description 'x64 one-click manager'
 
 $temporaryRoot = [IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetTempPath()) ('ffb-interceptor-launcher-' + [Guid]::NewGuid().ToString('N'))))
 $systemTemp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
@@ -59,8 +92,15 @@ if (-not $temporaryRoot.StartsWith($systemTemp, [StringComparison]::OrdinalIgnor
 
 try {
     $dashboardOutput = Join-Path $temporaryRoot 'dashboards'
-    & (Join-Path $PSScriptRoot 'Build-SimHubPackage.ps1') -Configuration $Configuration `
-        -SimHubInstallPath $SimHubInstallPath -OutputDirectory $dashboardOutput
+    $simHubPackageArguments = @{
+        Configuration = $Configuration
+        SimHubInstallPath = $SimHubInstallPath
+        OutputDirectory = $dashboardOutput
+        SigningCertificateThumbprint = $SigningCertificateThumbprint
+        TimestampUrl = $TimestampUrl
+    }
+    if ($RequireSigning) { $simHubPackageArguments.RequireSigning = $true }
+    & (Join-Path $PSScriptRoot 'Build-SimHubPackage.ps1') @simHubPackageArguments
     if ($LASTEXITCODE -ne 0) { throw 'SimHub package build failed.' }
 
     $bundleName = "FFBInterceptor-Launcher-$version"
@@ -90,6 +130,12 @@ try {
     Copy-Item -LiteralPath $hookX64 -Destination (Join-Path $launcherX64Destination 'FFBInterceptor.Hook.dll')
     Copy-Item -LiteralPath $launcherX86 -Destination (Join-Path $launcherX86Destination 'FFBInterceptor.Launcher.exe')
     Copy-Item -LiteralPath $hookX86 -Destination (Join-Path $launcherX86Destination 'FFBInterceptor.Hook.dll')
+    Copy-Item -LiteralPath $managerX64 -Destination (Join-Path $bundleRoot 'FFBInterceptor.Manager.exe')
+    $stableManagerSigner = ''
+    if ($RequireSigning) {
+        $stableManagerSigner = [string](& (Join-Path $PSScriptRoot 'Test-ManagerBuildPolicy.ps1') `
+            -ManagerPath (Join-Path $bundleRoot 'FFBInterceptor.Manager.exe'))
+    }
 
     $pluginOutput = Join-Path $simHubRoot "FFBInterceptor.SimHub\bin\$Configuration\net48"
     foreach ($name in @('FFBInterceptor.SimHub.dll', 'FFBInterceptor.Core.dll')) {
@@ -102,12 +148,44 @@ try {
     }
 
     Copy-Item -LiteralPath (Join-Path $simHubRoot 'LAUNCHER.zh-TW.md') -Destination (Join-Path $bundleRoot 'README.zh-TW.md')
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot 'launcher\MANAGER.zh-TW.md') -Destination $bundleRoot
     foreach ($name in @('LICENSE', 'THIRD_PARTY_NOTICES.md')) {
         Copy-Item -LiteralPath (Join-Path $repositoryRoot $name) -Destination $bundleRoot
     }
     $licenseDestination = Join-Path $bundleRoot 'licenses'
     [IO.Directory]::CreateDirectory($licenseDestination) | Out-Null
     Copy-Item -LiteralPath (Join-Path $repositoryRoot 'licenses\upstream-dcs-force-feedback-fix-MIT.txt') -Destination $licenseDestination
+
+    $signingTargets = @(
+        (Join-Path $bundleRoot 'FFBInterceptor.Manager.exe'),
+        (Join-Path $bundleRoot 'FFBInterceptor.Common.ps1'),
+        (Join-Path $bundleRoot 'Install-SimHubPlugin.ps1'),
+        (Join-Path $bundleRoot 'Start-FFBInterceptor.ps1'),
+        (Join-Path $bundleRoot 'Uninstall-SimHubPlugin.ps1'),
+        (Join-Path $launcherX64Destination 'FFBInterceptor.Launcher.exe'),
+        (Join-Path $launcherX64Destination 'FFBInterceptor.Hook.dll'),
+        (Join-Path $launcherX86Destination 'FFBInterceptor.Launcher.exe'),
+        (Join-Path $launcherX86Destination 'FFBInterceptor.Hook.dll'),
+        (Join-Path $simHubDestination 'FFBInterceptor.SimHub.dll'),
+        (Join-Path $simHubDestination 'FFBInterceptor.Core.dll')
+    )
+    $signingArguments = @{
+        Paths = $signingTargets
+        CertificateThumbprint = $SigningCertificateThumbprint
+        TimestampUrl = $TimestampUrl
+    }
+    if ($RequireSigning) { $signingArguments.RequireSigning = $true }
+    & (Join-Path $repositoryRoot '.github\scripts\sign-windows-artifacts.ps1') @signingArguments
+    if ($RequireSigning) {
+        $signedManagerPolicySigner = [string](& (Join-Path $PSScriptRoot 'Test-ManagerBuildPolicy.ps1') `
+            -ManagerPath (Join-Path $bundleRoot 'FFBInterceptor.Manager.exe'))
+        if ($signedManagerPolicySigner -cne $stableManagerSigner) {
+            throw 'Signed stable Manager build-policy marker changed during signing.'
+        }
+        Assert-StableManagerSignature `
+            -ManagerPath (Join-Path $bundleRoot 'FFBInterceptor.Manager.exe') `
+            -ExpectedSigner $stableManagerSigner
+    }
 
     $manifestLines = @(
         Get-ChildItem -LiteralPath $bundleRoot -Recurse -File |
@@ -119,32 +197,24 @@ try {
     )
     [IO.File]::WriteAllLines((Join-Path $bundleRoot 'SHA256SUMS.txt'), $manifestLines, [Text.UTF8Encoding]::new($false))
 
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = Assert-ChildPath -Parent $resolvedOutput -Child (Join-Path $resolvedOutput ($bundleName + '.zip'))
     $partialArchive = Assert-ChildPath -Parent $resolvedOutput -Child `
         (Join-Path $resolvedOutput ($bundleName + '.' + [Guid]::NewGuid().ToString('N') + '.partial.zip'))
-    $previousArchive = ''
     try {
-        [IO.Compression.ZipFile]::CreateFromDirectory(
-            $bundleRoot, $partialArchive, [IO.Compression.CompressionLevel]::Optimal, $true)
+        New-CanonicalZipArchive -SourceDirectory $bundleRoot `
+            -DestinationPath $partialArchive -IncludeBaseDirectory
+        $validatedHash = Get-LockedFileSha256 -Path $partialArchive
         & (Join-Path $PSScriptRoot 'Test-LauncherPackage.ps1') -PackagePath $partialArchive
         if ($LASTEXITCODE -ne 0) { throw 'Launcher package validation failed.' }
-        if (Test-Path -LiteralPath $archive -PathType Leaf) {
-            $previousArchive = Assert-ChildPath -Parent $resolvedOutput -Child `
-                (Join-Path $resolvedOutput ($bundleName + '.' + [Guid]::NewGuid().ToString('N') + '.previous.zip'))
-            [IO.File]::Replace($partialArchive, $archive, $previousArchive, $true)
-            Remove-Item -LiteralPath $previousArchive -Force
-            $previousArchive = ''
+        $postValidationHash = Get-LockedFileSha256 -Path $partialArchive
+        if ($postValidationHash -cne $validatedHash) {
+            throw 'Launcher package bytes changed while they were being validated.'
         }
-        else {
-            [IO.File]::Move($partialArchive, $archive)
-        }
+        [void](Publish-ValidatedArchive -PartialPath $partialArchive `
+            -DestinationPath $archive -ExpectedSha256 $validatedHash)
     }
     finally {
         if (Test-Path -LiteralPath $partialArchive) { Remove-Item -LiteralPath $partialArchive -Force }
-        if ($previousArchive -and (Test-Path -LiteralPath $previousArchive)) {
-            Remove-Item -LiteralPath $previousArchive -Force
-        }
     }
     Write-Host "Built $archive"
 }

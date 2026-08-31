@@ -12,9 +12,9 @@
   "EnableOnDashboardMessaging": true,
   "PitScreensIndexs": [0],
   "SimHubVersion": "9.11.22",
-  "Category": "Force Feedback",
+  "Category": "力回饋",
   "Title": "FFB Interceptor Overlay 480x160",
-  "Description": "High-contrast DirectInput command clipping overlay",
+  "Description": "高對比 DirectInput 同裝置多效果保守合併命令削峰浮動視窗",
   "Author": "FFB Interceptor contributors",
-  "DashboardVersion": "1.0.0"
+  "DashboardVersion": "1.1.0"
 }

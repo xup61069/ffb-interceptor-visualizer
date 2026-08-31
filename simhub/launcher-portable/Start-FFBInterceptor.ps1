@@ -14,6 +14,7 @@ Set-StrictMode -Version Latest
 $commonScript = Join-Path (Split-Path -Parent $PSCommandPath) 'FFBInterceptor.Common.ps1'
 if (-not (Test-Path -LiteralPath $commonScript -PathType Leaf)) { throw "Package file is missing: $commonScript" }
 . $commonScript
+[void](Assert-FFBPackageManifest -BundleRoot (Split-Path -Parent $PSCommandPath))
 
 function Resolve-GameExecutable {
     param([string]$Path)
@@ -62,9 +63,9 @@ function Wait-FFBSimHubPipe {
 using System;
 using System.Runtime.InteropServices;
 namespace FFBInterceptor {
-    internal static class LauncherNativeMethods {
+    public static class LauncherNativeMethods {
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        internal static extern bool WaitNamedPipe(string name, uint timeoutMilliseconds);
+        public static extern bool WaitNamedPipe(string name, uint timeoutMilliseconds);
     }
 }
 '@
@@ -81,6 +82,24 @@ namespace FFBInterceptor {
     return $false
 }
 
+function Open-FFBManager {
+    param(
+        [Parameter(Mandatory = $true)][string]$BundleRoot,
+        [Parameter(Mandatory = $true)][string]$Message
+    )
+    $managerPath = Join-Path $BundleRoot 'FFBInterceptor.Manager.exe'
+    if (-not (Test-Path -LiteralPath $managerPath -PathType Leaf)) {
+        throw "Package file is missing: $managerPath"
+    }
+    $manager = Get-Item -LiteralPath $managerPath -Force
+    if ($manager.PSIsContainer -or
+        ($manager.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw "The package Manager is not a regular file: $managerPath"
+    }
+    Write-Host $Message
+    Start-Process -FilePath $manager.FullName | Out-Null
+}
+
 try {
     if (-not $ValidateOnly -and (Test-FFBAdministrator)) {
         throw 'For safety, start the game from a normal non-administrator account.'
@@ -89,22 +108,33 @@ try {
     $bundleRoot = Split-Path -Parent $PSCommandPath
     if (-not $ValidateOnly -and -not $SkipSimHubCheck) {
         $statePath = Get-FFBStatePath
-        $wasInstalled = Test-Path -LiteralPath $statePath -PathType Leaf
-        $installerArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $bundleRoot 'Install-SimHubPlugin.ps1'), '-NoPause')
+        if (-not (Test-Path -LiteralPath $statePath -PathType Leaf)) {
+            Open-FFBManager -BundleRoot $bundleRoot -Message `
+                'SimHub plug-in setup is handled by FFBInterceptor Manager. Complete setup in the Manager window.'
+            exit 0
+        }
+
+        # Start never installs or elevates.  -NoElevation is used only after a
+        # protected state file already exists, so the installer can take its
+        # idempotent verification path. Any repair remains a Manager action.
+        $installerArguments = @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+            (Join-Path $bundleRoot 'Install-SimHubPlugin.ps1'),
+            '-NoElevation', '-NoDashboardImport', '-NoPause'
+        )
         if ($SimHubInstallPath) { $installerArguments += @('-SimHubInstallPath', $SimHubInstallPath) }
         & powershell.exe @installerArguments
-        if ($LASTEXITCODE -ne 0) { throw 'SimHub plug-in setup did not complete.' }
+        if ($LASTEXITCODE -ne 0) {
+            Open-FFBManager -BundleRoot $bundleRoot -Message `
+                'The managed SimHub plug-in needs repair or an update. Continue in the FFBInterceptor Manager window.'
+            exit 0
+        }
 
         $state = Read-FFBPluginState -RequireSimHubExecutable
         $simHubExe = Get-FFBSimHubExecutablePath -Path ([string]$state.InstallPath)
         if (-not (Get-Process -Name 'SimHub', 'SimHubWPF' -ErrorAction SilentlyContinue) -and
             (Test-Path -LiteralPath $simHubExe -PathType Leaf)) {
             Start-Process -FilePath $simHubExe | Out-Null
-        }
-        if (-not $wasInstalled) {
-            Write-Host 'First-time setup is complete. Enable FFB Interceptor in SimHub Settings > Plugins, then run this file again.'
-            if (-not $NoPause) { [void](Read-Host 'Press Enter to close') }
-            exit 0
         }
         if (-not (Wait-FFBSimHubPipe)) {
             throw 'The SimHub plug-in pipe did not become ready. Enable FFB Interceptor in SimHub, then try again.'
