@@ -13,7 +13,6 @@ permissions: {}
 env:
   RELEASE_TAG: ${{ github.event.client_payload.tag }}
   RELEASE_CHANNEL: ${{ github.event.client_payload.channel }}
-  SIMHUB_INSTALL_PATH: ${{ github.event.client_payload.simhub_path }}
 
 jobs:
   build:
@@ -34,6 +33,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Validate repository dispatch payload
+        id: validated-payload
         shell: pwsh
         env:
           FFB_CLIENT_PAYLOAD_JSON: ${{ toJson(github.event.client_payload) }}
@@ -42,14 +42,14 @@ jobs:
           $names = @($payload.PSObject.Properties | ForEach-Object Name | Sort-Object)
           $expectedNames = @('channel', 'simhub_path', 'tag')
           if ($names.Count -ne $expectedNames.Count -or
-              (Compare-Object -ReferenceObject $expectedNames -DifferenceObject $names)) {
+              (Compare-Object -ReferenceObject $expectedNames -DifferenceObject $names -CaseSensitive)) {
             throw 'Full release client_payload must contain exactly: tag, channel, simhub_path.'
           }
           $tag = [string]$payload.tag
           $channel = [string]$payload.channel
           $simHubPath = [string]$payload.simhub_path
           if ($tag -cne $env:RELEASE_TAG -or
-              $tag -notmatch '^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\z') {
+              $tag -cnotmatch '^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\z') {
             throw 'Full release client_payload.tag must be a canonical vX.Y.Z tag.'
           }
           if ($channel -cne $env:RELEASE_CHANNEL -or $channel -cnotin @('experimental', 'stable')) {
@@ -65,39 +65,240 @@ jobs:
           if (-not [IO.Path]::IsPathRooted($normalisedSimHubPath)) {
             throw 'Full release client_payload.simhub_path did not resolve to an absolute path.'
           }
-          "SIMHUB_INSTALL_PATH=$normalisedSimHubPath" |
-            Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
-      - name: Bind release tag to trusted master HEAD
-        id: bind-release
+          "simhub_install_path=$normalisedSimHubPath" |
+            Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Snapshot trusted release controls
+        id: trusted-controls
         shell: pwsh
         run: |
-          $commit = .github/scripts/verify-release-ref.ps1 `
-            -RefreshRemote -RequireMasterHead -PassThru
-          if ($commit -notmatch '^[0-9a-f]{40}$') { throw 'Release binding returned an invalid commit SHA.' }
-          "commit_sha=$commit" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "FFB_RELEASE_COMMIT=$commit" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+          $controlRoot = Join-Path $env:RUNNER_TEMP ('ffb-release-controls-' + [Guid]::NewGuid().ToString('N'))
+          [IO.Directory]::CreateDirectory($controlRoot) | Out-Null
+          foreach ($name in @(
+            'release-api.ps1',
+            'assert-release-assets-empty.ps1',
+            'publish-release-assets.ps1',
+            'verify-release-ref.ps1',
+            'wait-required-checks.ps1',
+            'import-signing-certificate.ps1',
+            'sign-windows-artifacts.ps1'
+          )) {
+            Copy-Item -LiteralPath (Join-Path '.github/scripts' $name) -Destination $controlRoot
+          }
+          @(
+            "release_api=$(Join-Path $controlRoot 'release-api.ps1')",
+            "release_api_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'release-api.ps1') -Algorithm SHA256).Hash)",
+            "release_preflight=$(Join-Path $controlRoot 'assert-release-assets-empty.ps1')",
+            "release_preflight_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'assert-release-assets-empty.ps1') -Algorithm SHA256).Hash)",
+            "publisher=$(Join-Path $controlRoot 'publish-release-assets.ps1')",
+            "publisher_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'publish-release-assets.ps1') -Algorithm SHA256).Hash)",
+            "verify_release_ref=$(Join-Path $controlRoot 'verify-release-ref.ps1')",
+            "verify_release_ref_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'verify-release-ref.ps1') -Algorithm SHA256).Hash)",
+            "wait_required_checks=$(Join-Path $controlRoot 'wait-required-checks.ps1')",
+            "wait_required_checks_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'wait-required-checks.ps1') -Algorithm SHA256).Hash)",
+            "import_signing_certificate=$(Join-Path $controlRoot 'import-signing-certificate.ps1')",
+            "import_signing_certificate_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'import-signing-certificate.ps1') -Algorithm SHA256).Hash)",
+            "sign_windows_artifacts=$(Join-Path $controlRoot 'sign-windows-artifacts.ps1')",
+            "sign_windows_artifacts_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'sign-windows-artifacts.ps1') -Algorithm SHA256).Hash)"
+          ) | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Preflight release recovery state
+        id: release-preflight
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          FFB_TRUSTED_RELEASE_API: ${{ steps.trusted-controls.outputs.release_api }}
+          FFB_TRUSTED_RELEASE_API_SHA256: ${{ steps.trusted-controls.outputs.release_api_sha256 }}
+          FFB_TRUSTED_RELEASE_PREFLIGHT: ${{ steps.trusted-controls.outputs.release_preflight }}
+          FFB_TRUSTED_RELEASE_PREFLIGHT_SHA256: ${{ steps.trusted-controls.outputs.release_preflight_sha256 }}
+        run: |
+          foreach ($trustedFile in @(
+            @{ Path = $env:FFB_TRUSTED_RELEASE_API; Sha256 = $env:FFB_TRUSTED_RELEASE_API_SHA256 },
+            @{ Path = $env:FFB_TRUSTED_RELEASE_PREFLIGHT; Sha256 = $env:FFB_TRUSTED_RELEASE_PREFLIGHT_SHA256 }
+          )) {
+            if ($trustedFile.Sha256 -cnotmatch '^[A-F0-9]{64}$' -or
+                -not (Test-Path -LiteralPath $trustedFile.Path -PathType Leaf) -or
+                (Get-FileHash -LiteralPath $trustedFile.Path -Algorithm SHA256).Hash -cne $trustedFile.Sha256) {
+              throw "Trusted release control failed SHA-256 verification: $($trustedFile.Path)"
+            }
+          }
+          . $env:FFB_TRUSTED_RELEASE_API
+          $version = $env:RELEASE_TAG.Substring(1)
+          $expectedAssets = @(
+            'ffb-proxy-x64.zip',
+            'ffb-proxy-x86.zip',
+            'ffb-viewer-x64.zip',
+            "ffb-interceptor-visualizer-$env:RELEASE_TAG-source.zip",
+            'sbom.cdx.json',
+            'sbom.spdx.json',
+            'python-environment.cdx.json',
+            'python-environment.spdx.json',
+            'SHA256SUMS',
+            "FFBInterceptor-SimHub-$version.zip",
+            "FFBInterceptor-Launcher-$version.zip"
+          )
+          $release = Get-FFBUniqueReleaseByTag -Repository $env:GITHUB_REPOSITORY -Tag $env:RELEASE_TAG
+          $state = 'absent'
+          # Passing zero to the publisher is intentional: it binds an empty
+          # slot so a draft that appears after this read-only preflight cannot
+          # be adopted by this run.
+          $releaseId = '0'
+          if ($release) {
+            if ([bool]$release.draft) {
+              Assert-FFBMutableReleaseDraft -ReleaseDocument $release -Tag $env:RELEASE_TAG
+              $recovery = & $env:FFB_TRUSTED_RELEASE_PREFLIGHT -Repository $env:GITHUB_REPOSITORY `
+                -Tag $env:RELEASE_TAG -ExpectedAssetNames $expectedAssets -PassThru
+              if (-not [bool]$recovery.RecoveryDraft -or [long]$recovery.ReleaseId -ne [long]$release.id) {
+                throw 'Release recovery preflight did not pin the unique mutable draft.'
+              }
+              $releaseId = [string][long]$recovery.ReleaseId
+              $pinnedRelease = Get-FFBUniqueReleaseByTag -Repository $env:GITHUB_REPOSITORY `
+                -Tag $env:RELEASE_TAG -ExpectedId ([long]$releaseId)
+              Assert-FFBMutableReleaseDraft -ReleaseDocument $pinnedRelease -Tag $env:RELEASE_TAG
+              $state = 'draft-recovery'
+            }
+            else {
+              $state = 'published'
+            }
+          }
+          @(
+            "release_state=$state",
+            "release_id=$releaseId"
+          ) | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Bind release tag to trusted master history
+        id: bind-release
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          RELEASE_CHANNEL: ${{ github.event.client_payload.channel }}
+          FFB_RELEASE_STATE: ${{ steps.release-preflight.outputs.release_state }}
+        run: |
+          git fetch --force --no-tags origin '+refs/heads/master:refs/remotes/origin/master'
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to refresh origin/master before binding the release ref.' }
+          git fetch --force --no-tags origin "+refs/tags/$env:RELEASE_TAG:refs/tags/$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw "Unable to refresh release tag $env:RELEASE_TAG." }
+          $headCommit = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $masterCommit = (git rev-parse refs/remotes/origin/master).Trim().ToLowerInvariant()
+          $tagCommit = (git rev-list -n 1 $env:RELEASE_TAG).Trim().ToLowerInvariant()
+          foreach ($commit in @($headCommit, $masterCommit, $tagCommit)) {
+            if ($commit -notmatch '^[0-9a-f]{40}$') { throw 'Release binding produced an invalid commit SHA.' }
+          }
+          if ($headCommit -cne $masterCommit) {
+            throw "Trusted master checkout mismatch: HEAD=$headCommit, origin/master=$masterCommit"
+          }
+          if ($env:FFB_RELEASE_STATE -eq 'draft-recovery') {
+            if ($env:RELEASE_CHANNEL -eq 'stable') {
+              throw 'Stable channel cannot resume an existing draft; use a fresh tag at current master HEAD.'
+            }
+            git merge-base --is-ancestor $tagCommit refs/remotes/origin/master
+            if ($LASTEXITCODE -ne 0) {
+              throw "Recovery draft tag $env:RELEASE_TAG is not an ancestor of origin/master."
+            }
+          }
+          elseif ($tagCommit -cne $masterCommit) {
+            throw "Release tag $env:RELEASE_TAG must equal current origin/master HEAD outside draft recovery."
+          }
+          "commit_sha=$tagCommit" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ steps.bind-release.outputs.commit_sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Revalidate release state before using tagged source
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          FFB_RELEASE_STATE: ${{ steps.release-preflight.outputs.release_state }}
+          FFB_EXPECTED_RELEASE_ID: ${{ steps.release-preflight.outputs.release_id }}
+          FFB_TRUSTED_RELEASE_API: ${{ steps.trusted-controls.outputs.release_api }}
+          FFB_TRUSTED_RELEASE_API_SHA256: ${{ steps.trusted-controls.outputs.release_api_sha256 }}
+          FFB_TRUSTED_RELEASE_PREFLIGHT: ${{ steps.trusted-controls.outputs.release_preflight }}
+          FFB_TRUSTED_RELEASE_PREFLIGHT_SHA256: ${{ steps.trusted-controls.outputs.release_preflight_sha256 }}
+        run: |
+          foreach ($trustedFile in @(
+            @{ Path = $env:FFB_TRUSTED_RELEASE_API; Sha256 = $env:FFB_TRUSTED_RELEASE_API_SHA256 },
+            @{ Path = $env:FFB_TRUSTED_RELEASE_PREFLIGHT; Sha256 = $env:FFB_TRUSTED_RELEASE_PREFLIGHT_SHA256 }
+          )) {
+            if ($trustedFile.Sha256 -cnotmatch '^[A-F0-9]{64}$' -or
+                -not (Test-Path -LiteralPath $trustedFile.Path -PathType Leaf) -or
+                (Get-FileHash -LiteralPath $trustedFile.Path -Algorithm SHA256).Hash -cne $trustedFile.Sha256) {
+              throw "Trusted release control failed SHA-256 verification: $($trustedFile.Path)"
+            }
+          }
+          . $env:FFB_TRUSTED_RELEASE_API
+          if ($env:FFB_RELEASE_STATE -eq 'absent') {
+            if ($env:FFB_EXPECTED_RELEASE_ID -cne '0') {
+              throw 'Absent release state did not preserve the zero-ID binding.'
+            }
+            if (Get-FFBUniqueReleaseByTag -Repository $env:GITHUB_REPOSITORY -Tag $env:RELEASE_TAG) {
+              throw 'A release appeared after the empty publication slot was bound.'
+            }
+          }
+          elseif ($env:FFB_RELEASE_STATE -eq 'draft-recovery') {
+            if ($env:FFB_EXPECTED_RELEASE_ID -notmatch '^[1-9]\d*$') {
+              throw 'Draft recovery did not preserve a positive numeric release ID.'
+            }
+            $version = $env:RELEASE_TAG.Substring(1)
+            $expectedAssets = @(
+              'ffb-proxy-x64.zip',
+              'ffb-proxy-x86.zip',
+              'ffb-viewer-x64.zip',
+              "ffb-interceptor-visualizer-$env:RELEASE_TAG-source.zip",
+              'sbom.cdx.json',
+              'sbom.spdx.json',
+              'python-environment.cdx.json',
+              'python-environment.spdx.json',
+              'SHA256SUMS',
+              "FFBInterceptor-SimHub-$version.zip",
+              "FFBInterceptor-Launcher-$version.zip"
+            )
+            $recovery = & $env:FFB_TRUSTED_RELEASE_PREFLIGHT -Repository $env:GITHUB_REPOSITORY `
+              -Tag $env:RELEASE_TAG -ExpectedAssetNames $expectedAssets -PassThru
+            if (-not [bool]$recovery.RecoveryDraft -or
+                [long]$recovery.ReleaseId -ne [long]$env:FFB_EXPECTED_RELEASE_ID) {
+              throw 'Pinned draft recovery state changed after the tagged checkout.'
+            }
+          }
+          elseif ($env:FFB_RELEASE_STATE -eq 'published') {
+            throw 'The requested tag already has a published release; Full recovery never mutates or re-channels it.'
+          }
+          else {
+            throw "Invalid release preflight state: $env:FFB_RELEASE_STATE"
+          }
       - name: Verify bound release ref and exact-commit checks
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          FFB_RELEASE_STATE: ${{ steps.release-preflight.outputs.release_state }}
+          FFB_RELEASE_COMMIT: ${{ steps.bind-release.outputs.commit_sha }}
+          FFB_TRUSTED_VERIFY_RELEASE_REF: ${{ steps.trusted-controls.outputs.verify_release_ref }}
+          FFB_TRUSTED_VERIFY_RELEASE_REF_SHA256: ${{ steps.trusted-controls.outputs.verify_release_ref_sha256 }}
+          FFB_TRUSTED_WAIT_REQUIRED_CHECKS: ${{ steps.trusted-controls.outputs.wait_required_checks }}
+          FFB_TRUSTED_WAIT_REQUIRED_CHECKS_SHA256: ${{ steps.trusted-controls.outputs.wait_required_checks_sha256 }}
         run: |
-          .github/scripts/verify-release-ref.ps1 -RefreshRemote `
-            -ExpectedCommitSha $env:FFB_RELEASE_COMMIT
-          .github/scripts/wait-required-checks.ps1 `
+          foreach ($trustedFile in @(
+            @{ Path = $env:FFB_TRUSTED_VERIFY_RELEASE_REF; Sha256 = $env:FFB_TRUSTED_VERIFY_RELEASE_REF_SHA256 },
+            @{ Path = $env:FFB_TRUSTED_WAIT_REQUIRED_CHECKS; Sha256 = $env:FFB_TRUSTED_WAIT_REQUIRED_CHECKS_SHA256 }
+          )) {
+            if ($trustedFile.Sha256 -cnotmatch '^[A-F0-9]{64}$' -or
+                -not (Test-Path -LiteralPath $trustedFile.Path -PathType Leaf) -or
+                (Get-FileHash -LiteralPath $trustedFile.Path -Algorithm SHA256).Hash -cne $trustedFile.Sha256) {
+              throw "Trusted release control failed SHA-256 verification: $($trustedFile.Path)"
+            }
+          }
+          $verifyArguments = @{ RefreshRemote = $true; ExpectedCommitSha = $env:FFB_RELEASE_COMMIT }
+          if ($env:FFB_RELEASE_STATE -ne 'draft-recovery') {
+            $verifyArguments.RequireMasterHead = $true
+          }
+          & $env:FFB_TRUSTED_VERIFY_RELEASE_REF @verifyArguments
+          & $env:FFB_TRUSTED_WAIT_REQUIRED_CHECKS `
             -Repository $env:GITHUB_REPOSITORY `
             -CommitSha (git rev-parse HEAD).Trim()
-      - name: Require an empty Full release asset slot
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: .github/scripts/assert-release-assets-empty.ps1
       - name: Verify installed SimHub SDK fingerprint
         shell: pwsh
+        env:
+          SIMHUB_INSTALL_PATH: ${{ steps.validated-payload.outputs.simhub_install_path }}
         run: simhub/tools/Test-SimHubSdk.ps1 -SimHubInstallPath $env:SIMHUB_INSTALL_PATH
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
@@ -107,7 +308,7 @@ jobs:
           version: '0.12.5'
           enable-cache: false
       - name: Configure unsigned Full experimental channel
-        if: ${{ env.RELEASE_CHANNEL == 'experimental' }}
+        if: ${{ github.event.client_payload.channel == 'experimental' }}
         shell: pwsh
         run: |
           @(
@@ -118,18 +319,51 @@ jobs:
           ) | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host 'Full experimental release is explicitly UNSIGNED.'
       - name: Load Stable release signing identity and policy
-        if: ${{ env.RELEASE_CHANNEL == 'stable' }}
+        if: ${{ github.event.client_payload.channel == 'stable' }}
         shell: pwsh
         env:
           FFB_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
           FFB_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
           FFB_EXPECTED_SIGNER_SHA256: ${{ secrets.WINDOWS_SIGNER_SHA256 }}
+          FFB_TRUSTED_IMPORT_SIGNING_CERTIFICATE: ${{ steps.trusted-controls.outputs.import_signing_certificate }}
+          FFB_TRUSTED_IMPORT_SIGNING_CERTIFICATE_SHA256: ${{ steps.trusted-controls.outputs.import_signing_certificate_sha256 }}
         run: |
-          .github/scripts/import-signing-certificate.ps1 -RequireSigning
+          if ($env:FFB_TRUSTED_IMPORT_SIGNING_CERTIFICATE_SHA256 -cnotmatch '^[A-F0-9]{64}$' -or
+              -not (Test-Path -LiteralPath $env:FFB_TRUSTED_IMPORT_SIGNING_CERTIFICATE -PathType Leaf) -or
+              (Get-FileHash -LiteralPath $env:FFB_TRUSTED_IMPORT_SIGNING_CERTIFICATE -Algorithm SHA256).Hash `
+                -cne $env:FFB_TRUSTED_IMPORT_SIGNING_CERTIFICATE_SHA256) {
+            throw 'Trusted signing-certificate importer failed SHA-256 verification.'
+          }
+          & $env:FFB_TRUSTED_IMPORT_SIGNING_CERTIFICATE -RequireSigning
       - name: Build channel-policy launcher, hook, manager, and tests
         shell: pwsh
+        env:
+          RELEASE_CHANNEL: ${{ github.event.client_payload.channel }}
+          FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS: ${{ steps.trusted-controls.outputs.sign_windows_artifacts }}
+          FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS_SHA256: ${{ steps.trusted-controls.outputs.sign_windows_artifacts_sha256 }}
         run: |
           $stable = $env:RELEASE_CHANNEL -eq 'stable'
+          function Restore-FFBTrustedSigner {
+            if ($env:FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS_SHA256 -cnotmatch '^[A-F0-9]{64}$' -or
+                -not (Test-Path -LiteralPath $env:FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS -PathType Leaf)) {
+              throw 'Trusted signer path or SHA-256 binding is invalid.'
+            }
+            $trustedBytes = [IO.File]::ReadAllBytes($env:FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS)
+            $sha256 = [Security.Cryptography.SHA256]::Create()
+            try {
+              $trustedHash = [BitConverter]::ToString($sha256.ComputeHash($trustedBytes)).Replace('-', '')
+            }
+            finally { $sha256.Dispose() }
+            if ($trustedHash -cne $env:FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS_SHA256) {
+              throw 'Trusted signer source failed SHA-256 verification.'
+            }
+            $scriptsDirectory = (Resolve-Path -LiteralPath '.github/scripts' -ErrorAction Stop).Path
+            $tagBuildSigner = Join-Path $scriptsDirectory 'sign-windows-artifacts.ps1'
+            [IO.File]::WriteAllBytes($tagBuildSigner, $trustedBytes)
+            if ((Get-FileHash -LiteralPath $tagBuildSigner -Algorithm SHA256).Hash -cne $trustedHash) {
+              throw 'Trusted signer copy failed SHA-256 verification.'
+            }
+          }
           if ($stable -and $env:FFB_SIGNER_SHA256 -notmatch '^[A-F0-9]{64}$') {
             throw 'Stable Manager build requires the pinned signer SHA-256.'
           }
@@ -141,6 +375,7 @@ jobs:
           $stableValue = if ($stable) { 'ON' } else { 'OFF' }
           $signer = if ($stable) { $env:FFB_SIGNER_SHA256 } else { '' }
           foreach ($architecture in @('x64', 'x86')) {
+            if ($stable) { Restore-FFBTrustedSigner }
             $build = "build\$architecture-sdk"
             $command = "call `"$devcmd`" -arch=$architecture >nul && " +
               "cmake -S . -B $build -G Ninja -DCMAKE_BUILD_TYPE=Release " +
@@ -151,8 +386,36 @@ jobs:
           }
       - name: Build base, SimHub, and no-game-DLL launcher packages
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          RELEASE_CHANNEL: ${{ github.event.client_payload.channel }}
+          SIMHUB_INSTALL_PATH: ${{ steps.validated-payload.outputs.simhub_install_path }}
+          FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS: ${{ steps.trusted-controls.outputs.sign_windows_artifacts }}
+          FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS_SHA256: ${{ steps.trusted-controls.outputs.sign_windows_artifacts_sha256 }}
         run: |
           $stable = $env:RELEASE_CHANNEL -eq 'stable'
+          function Restore-FFBTrustedSigner {
+            if ($env:FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS_SHA256 -cnotmatch '^[A-F0-9]{64}$' -or
+                -not (Test-Path -LiteralPath $env:FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS -PathType Leaf)) {
+              throw 'Trusted signer path or SHA-256 binding is invalid.'
+            }
+            $trustedBytes = [IO.File]::ReadAllBytes($env:FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS)
+            $sha256 = [Security.Cryptography.SHA256]::Create()
+            try {
+              $trustedHash = [BitConverter]::ToString($sha256.ComputeHash($trustedBytes)).Replace('-', '')
+            }
+            finally { $sha256.Dispose() }
+            if ($trustedHash -cne $env:FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS_SHA256) {
+              throw 'Trusted signer source failed SHA-256 verification.'
+            }
+            $scriptsDirectory = (Resolve-Path -LiteralPath '.github/scripts' -ErrorAction Stop).Path
+            $tagBuildSigner = Join-Path $scriptsDirectory 'sign-windows-artifacts.ps1'
+            [IO.File]::WriteAllBytes($tagBuildSigner, $trustedBytes)
+            if ((Get-FileHash -LiteralPath $tagBuildSigner -Algorithm SHA256).Hash -cne $trustedHash) {
+              throw 'Trusted signer copy failed SHA-256 verification.'
+            }
+          }
+          if ($stable) { Restore-FFBTrustedSigner }
           .github/scripts/package-release.ps1 -RequireSigning:$stable
           $simhubPackageOutput = [IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP `
             ('ffb-simhub-release-' + [Guid]::NewGuid().ToString('N'))))
@@ -162,6 +425,7 @@ jobs:
           }
           [IO.Directory]::CreateDirectory($simhubPackageOutput) | Out-Null
           try {
+            if ($stable) { Restore-FFBTrustedSigner }
             simhub/tools/Build-SimHubPackage.ps1 `
               -SimHubInstallPath $env:SIMHUB_INSTALL_PATH `
               -OutputDirectory $simhubPackageOutput -RequireSigning:$stable
@@ -185,6 +449,7 @@ jobs:
               Remove-Item -LiteralPath $simhubPackageOutput -Recurse -Force
             }
           }
+          if ($stable) { Restore-FFBTrustedSigner }
           simhub/tools/Build-LauncherPackage.ps1 `
             -SimHubInstallPath $env:SIMHUB_INSTALL_PATH `
             -LauncherX64Path 'build\x64-sdk\FFBInterceptor.Launcher.exe' `
@@ -207,9 +472,37 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          RELEASE_CHANNEL: ${{ github.event.client_payload.channel }}
+          FFB_RELEASE_STATE: ${{ steps.release-preflight.outputs.release_state }}
+          FFB_RELEASE_COMMIT: ${{ steps.bind-release.outputs.commit_sha }}
+          FFB_EXPECTED_RELEASE_ID: ${{ steps.release-preflight.outputs.release_id }}
+          FFB_TRUSTED_RELEASE_API: ${{ steps.trusted-controls.outputs.release_api }}
+          FFB_TRUSTED_RELEASE_API_SHA256: ${{ steps.trusted-controls.outputs.release_api_sha256 }}
+          FFB_TRUSTED_PUBLISHER: ${{ steps.trusted-controls.outputs.publisher }}
+          FFB_TRUSTED_PUBLISHER_SHA256: ${{ steps.trusted-controls.outputs.publisher_sha256 }}
+          FFB_TRUSTED_VERIFY_RELEASE_REF: ${{ steps.trusted-controls.outputs.verify_release_ref }}
+          FFB_TRUSTED_VERIFY_RELEASE_REF_SHA256: ${{ steps.trusted-controls.outputs.verify_release_ref_sha256 }}
         run: |
-          .github/scripts/verify-release-ref.ps1 -RefreshRemote `
-            -ExpectedCommitSha $env:FFB_RELEASE_COMMIT
+          foreach ($trustedFile in @(
+            @{ Path = $env:FFB_TRUSTED_RELEASE_API; Sha256 = $env:FFB_TRUSTED_RELEASE_API_SHA256 },
+            @{ Path = $env:FFB_TRUSTED_PUBLISHER; Sha256 = $env:FFB_TRUSTED_PUBLISHER_SHA256 },
+            @{ Path = $env:FFB_TRUSTED_VERIFY_RELEASE_REF; Sha256 = $env:FFB_TRUSTED_VERIFY_RELEASE_REF_SHA256 }
+          )) {
+            if ($trustedFile.Sha256 -cnotmatch '^[A-F0-9]{64}$' -or
+                -not (Test-Path -LiteralPath $trustedFile.Path -PathType Leaf) -or
+                (Get-FileHash -LiteralPath $trustedFile.Path -Algorithm SHA256).Hash -cne $trustedFile.Sha256) {
+              throw "Trusted release control failed SHA-256 verification: $($trustedFile.Path)"
+            }
+          }
+          $verifyArguments = @{
+            RefreshRemote = $true
+            ExpectedCommitSha = $env:FFB_RELEASE_COMMIT
+          }
+          if ($env:FFB_RELEASE_STATE -ne 'draft-recovery') {
+            $verifyArguments.RequireMasterHead = $true
+          }
+          & $env:FFB_TRUSTED_VERIFY_RELEASE_REF @verifyArguments
           $stable = $env:RELEASE_CHANNEL -eq 'stable'
           $title = if ($stable) { "$env:RELEASE_TAG — 穩定版" } else { "$env:RELEASE_TAG — 實驗版" }
           $notice = if ($stable) {
@@ -217,13 +510,32 @@ jobs:
           } else {
             'UNSIGNED EXPERIMENTAL — 未簽章；只代表指令遙測，不是馬達扭力。'
           }
-          .github/scripts/publish-release-assets.ps1 `
-            -AssetsDirectory release -Tag $env:RELEASE_TAG `
-            -Repository $env:GITHUB_REPOSITORY -Title $title `
-            -NotesPath '.github/release-notes.md' -ChannelNotice $notice `
-            -Prerelease:(-not $stable)
+          $publisherArguments = @{
+            AssetsDirectory = 'release'
+            Tag = $env:RELEASE_TAG
+            Repository = $env:GITHUB_REPOSITORY
+            ExpectedAssetNames = @(
+              'ffb-proxy-x64.zip'
+              'ffb-proxy-x86.zip'
+              'ffb-viewer-x64.zip'
+              "ffb-interceptor-visualizer-$env:RELEASE_TAG-source.zip"
+              'sbom.cdx.json'
+              'sbom.spdx.json'
+              'python-environment.cdx.json'
+              'python-environment.spdx.json'
+              'SHA256SUMS'
+              "FFBInterceptor-SimHub-$($env:RELEASE_TAG.Substring(1)).zip"
+              "FFBInterceptor-Launcher-$($env:RELEASE_TAG.Substring(1)).zip"
+            )
+            Title = $title
+            NotesPath = '.github/release-notes.md'
+            ChannelNotice = $notice
+            Prerelease = (-not $stable)
+          }
+          $publisherArguments.ExpectedReleaseId = [long]$env:FFB_EXPECTED_RELEASE_ID
+          & $env:FFB_TRUSTED_PUBLISHER @publisherArguments
       - name: Remove signing identity imported by this run
-        if: ${{ always() && env.RELEASE_CHANNEL == 'stable' }}
+        if: ${{ always() && github.event.client_payload.channel == 'stable' }}
         shell: pwsh
         run: |
           $thumbprints = @($env:FFB_SIGNING_CERT_THUMBPRINTS -split ',' |

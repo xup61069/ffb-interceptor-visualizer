@@ -42,34 +42,225 @@ jobs:
           }
           $tag = [string]$payload.tag
           if ($tag -cne $env:RELEASE_TAG -or
-              $tag -notmatch '^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\z') {
+              $tag -cnotmatch '^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\z') {
             throw 'Base release client_payload.tag must be a canonical vX.Y.Z tag.'
           }
-      - name: Bind release tag to trusted master HEAD
-        id: bind-release
+      - name: Snapshot trusted release controls
+        id: trusted-controls
         shell: pwsh
         run: |
-          $commit = .github/scripts/verify-release-ref.ps1 `
-            -RefreshRemote -RequireMasterHead -PassThru
-          if ($commit -notmatch '^[0-9a-f]{40}$') { throw 'Release binding returned an invalid commit SHA.' }
-          "commit_sha=$commit" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "FFB_RELEASE_COMMIT=$commit" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+          $controlRoot = Join-Path $env:RUNNER_TEMP ('ffb-release-controls-' + [Guid]::NewGuid().ToString('N'))
+          [IO.Directory]::CreateDirectory($controlRoot) | Out-Null
+          foreach ($name in @(
+            'release-api.ps1',
+            'assert-release-assets-empty.ps1',
+            'publish-release-assets.ps1',
+            'verify-release-ref.ps1',
+            'wait-required-checks.ps1'
+          )) {
+            Copy-Item -LiteralPath (Join-Path '.github/scripts' $name) -Destination $controlRoot
+          }
+          @(
+            "release_api=$(Join-Path $controlRoot 'release-api.ps1')",
+            "release_api_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'release-api.ps1') -Algorithm SHA256).Hash)",
+            "release_preflight=$(Join-Path $controlRoot 'assert-release-assets-empty.ps1')",
+            "release_preflight_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'assert-release-assets-empty.ps1') -Algorithm SHA256).Hash)",
+            "publisher=$(Join-Path $controlRoot 'publish-release-assets.ps1')",
+            "publisher_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'publish-release-assets.ps1') -Algorithm SHA256).Hash)",
+            "verify_release_ref=$(Join-Path $controlRoot 'verify-release-ref.ps1')",
+            "verify_release_ref_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'verify-release-ref.ps1') -Algorithm SHA256).Hash)",
+            "wait_required_checks=$(Join-Path $controlRoot 'wait-required-checks.ps1')",
+            "wait_required_checks_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'wait-required-checks.ps1') -Algorithm SHA256).Hash)"
+          ) | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Preflight release recovery state
+        id: release-preflight
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          FFB_TRUSTED_RELEASE_API: ${{ steps.trusted-controls.outputs.release_api }}
+          FFB_TRUSTED_RELEASE_API_SHA256: ${{ steps.trusted-controls.outputs.release_api_sha256 }}
+          FFB_TRUSTED_RELEASE_PREFLIGHT: ${{ steps.trusted-controls.outputs.release_preflight }}
+          FFB_TRUSTED_RELEASE_PREFLIGHT_SHA256: ${{ steps.trusted-controls.outputs.release_preflight_sha256 }}
+        run: |
+          foreach ($trustedFile in @(
+            @{ Path = $env:FFB_TRUSTED_RELEASE_API; Sha256 = $env:FFB_TRUSTED_RELEASE_API_SHA256 },
+            @{ Path = $env:FFB_TRUSTED_RELEASE_PREFLIGHT; Sha256 = $env:FFB_TRUSTED_RELEASE_PREFLIGHT_SHA256 }
+          )) {
+            if ($trustedFile.Sha256 -cnotmatch '^[A-F0-9]{64}$' -or
+                -not (Test-Path -LiteralPath $trustedFile.Path -PathType Leaf) -or
+                (Get-FileHash -LiteralPath $trustedFile.Path -Algorithm SHA256).Hash -cne $trustedFile.Sha256) {
+              throw "Trusted release control failed SHA-256 verification: $($trustedFile.Path)"
+            }
+          }
+          . $env:FFB_TRUSTED_RELEASE_API
+          $expectedAssets = @(
+            'ffb-proxy-x64.zip',
+            'ffb-proxy-x86.zip',
+            'ffb-viewer-x64.zip',
+            "ffb-interceptor-visualizer-$env:RELEASE_TAG-source.zip",
+            'sbom.cdx.json',
+            'sbom.spdx.json',
+            'python-environment.cdx.json',
+            'python-environment.spdx.json',
+            'SHA256SUMS'
+          )
+          $release = Get-FFBUniqueReleaseByTag -Repository $env:GITHUB_REPOSITORY -Tag $env:RELEASE_TAG
+          $state = 'absent'
+          # Passing zero to the publisher is intentional: it binds an empty
+          # slot so a draft that appears after this read-only preflight cannot
+          # be adopted by this run.
+          $releaseId = '0'
+          if ($release) {
+            if ([bool]$release.draft) {
+              Assert-FFBMutableReleaseDraft -ReleaseDocument $release -Tag $env:RELEASE_TAG
+              $recovery = & $env:FFB_TRUSTED_RELEASE_PREFLIGHT -Repository $env:GITHUB_REPOSITORY `
+                -Tag $env:RELEASE_TAG -ExpectedAssetNames $expectedAssets -PassThru
+              if (-not [bool]$recovery.RecoveryDraft -or [long]$recovery.ReleaseId -ne [long]$release.id) {
+                throw 'Release recovery preflight did not pin the unique mutable draft.'
+              }
+              $releaseId = [string][long]$recovery.ReleaseId
+              $pinnedRelease = Get-FFBUniqueReleaseByTag -Repository $env:GITHUB_REPOSITORY `
+                -Tag $env:RELEASE_TAG -ExpectedId ([long]$releaseId)
+              Assert-FFBMutableReleaseDraft -ReleaseDocument $pinnedRelease -Tag $env:RELEASE_TAG
+              $state = 'draft-recovery'
+            }
+            else {
+              $state = 'published'
+            }
+          }
+          @(
+            "release_state=$state",
+            "release_id=$releaseId"
+          ) | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Bind release tag to trusted master history
+        id: bind-release
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          FFB_RELEASE_STATE: ${{ steps.release-preflight.outputs.release_state }}
+        run: |
+          git fetch --force --no-tags origin '+refs/heads/master:refs/remotes/origin/master'
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to refresh origin/master before binding the release ref.' }
+          git fetch --force --no-tags origin "+refs/tags/$env:RELEASE_TAG:refs/tags/$env:RELEASE_TAG"
+          if ($LASTEXITCODE -ne 0) { throw "Unable to refresh release tag $env:RELEASE_TAG." }
+          $headCommit = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $masterCommit = (git rev-parse refs/remotes/origin/master).Trim().ToLowerInvariant()
+          $tagCommit = (git rev-list -n 1 $env:RELEASE_TAG).Trim().ToLowerInvariant()
+          foreach ($commit in @($headCommit, $masterCommit, $tagCommit)) {
+            if ($commit -notmatch '^[0-9a-f]{40}$') { throw 'Release binding produced an invalid commit SHA.' }
+          }
+          if ($headCommit -cne $masterCommit) {
+            throw "Trusted master checkout mismatch: HEAD=$headCommit, origin/master=$masterCommit"
+          }
+          if ($env:FFB_RELEASE_STATE -eq 'draft-recovery') {
+            git merge-base --is-ancestor $tagCommit refs/remotes/origin/master
+            if ($LASTEXITCODE -ne 0) {
+              throw "Recovery draft tag $env:RELEASE_TAG is not an ancestor of origin/master."
+            }
+          }
+          elseif ($tagCommit -cne $masterCommit) {
+            throw "Release tag $env:RELEASE_TAG must equal current origin/master HEAD outside draft recovery."
+          }
+          "commit_sha=$tagCommit" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ steps.bind-release.outputs.commit_sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Revalidate release state before using tagged source
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          FFB_RELEASE_STATE: ${{ steps.release-preflight.outputs.release_state }}
+          FFB_EXPECTED_RELEASE_ID: ${{ steps.release-preflight.outputs.release_id }}
+          FFB_TRUSTED_RELEASE_API: ${{ steps.trusted-controls.outputs.release_api }}
+          FFB_TRUSTED_RELEASE_API_SHA256: ${{ steps.trusted-controls.outputs.release_api_sha256 }}
+          FFB_TRUSTED_RELEASE_PREFLIGHT: ${{ steps.trusted-controls.outputs.release_preflight }}
+          FFB_TRUSTED_RELEASE_PREFLIGHT_SHA256: ${{ steps.trusted-controls.outputs.release_preflight_sha256 }}
+        run: |
+          foreach ($trustedFile in @(
+            @{ Path = $env:FFB_TRUSTED_RELEASE_API; Sha256 = $env:FFB_TRUSTED_RELEASE_API_SHA256 },
+            @{ Path = $env:FFB_TRUSTED_RELEASE_PREFLIGHT; Sha256 = $env:FFB_TRUSTED_RELEASE_PREFLIGHT_SHA256 }
+          )) {
+            if ($trustedFile.Sha256 -cnotmatch '^[A-F0-9]{64}$' -or
+                -not (Test-Path -LiteralPath $trustedFile.Path -PathType Leaf) -or
+                (Get-FileHash -LiteralPath $trustedFile.Path -Algorithm SHA256).Hash -cne $trustedFile.Sha256) {
+              throw "Trusted release control failed SHA-256 verification: $($trustedFile.Path)"
+            }
+          }
+          . $env:FFB_TRUSTED_RELEASE_API
+          if ($env:FFB_RELEASE_STATE -eq 'absent') {
+            if ($env:FFB_EXPECTED_RELEASE_ID -cne '0') {
+              throw 'Absent release state did not preserve the zero-ID binding.'
+            }
+            if (Get-FFBUniqueReleaseByTag -Repository $env:GITHUB_REPOSITORY -Tag $env:RELEASE_TAG) {
+              throw 'A release appeared after the empty publication slot was bound.'
+            }
+          }
+          elseif ($env:FFB_RELEASE_STATE -eq 'draft-recovery') {
+            if ($env:FFB_EXPECTED_RELEASE_ID -notmatch '^[1-9]\d*$') {
+              throw 'Draft recovery did not preserve a positive numeric release ID.'
+            }
+            $expectedAssets = @(
+              'ffb-proxy-x64.zip',
+              'ffb-proxy-x86.zip',
+              'ffb-viewer-x64.zip',
+              "ffb-interceptor-visualizer-$env:RELEASE_TAG-source.zip",
+              'sbom.cdx.json',
+              'sbom.spdx.json',
+              'python-environment.cdx.json',
+              'python-environment.spdx.json',
+              'SHA256SUMS'
+            )
+            $recovery = & $env:FFB_TRUSTED_RELEASE_PREFLIGHT -Repository $env:GITHUB_REPOSITORY `
+              -Tag $env:RELEASE_TAG -ExpectedAssetNames $expectedAssets -PassThru
+            if (-not [bool]$recovery.RecoveryDraft -or
+                [long]$recovery.ReleaseId -ne [long]$env:FFB_EXPECTED_RELEASE_ID) {
+              throw 'Pinned draft recovery state changed after the tagged checkout.'
+            }
+          }
+          elseif ($env:FFB_RELEASE_STATE -eq 'published') {
+            throw 'The requested tag already has a published release; recovery never mutates public release state.'
+          }
+          else {
+            throw "Invalid release preflight state: $env:FFB_RELEASE_STATE"
+          }
       - name: Reverify bound release source
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          FFB_RELEASE_STATE: ${{ steps.release-preflight.outputs.release_state }}
+          FFB_RELEASE_COMMIT: ${{ steps.bind-release.outputs.commit_sha }}
+          FFB_TRUSTED_VERIFY_RELEASE_REF: ${{ steps.trusted-controls.outputs.verify_release_ref }}
+          FFB_TRUSTED_VERIFY_RELEASE_REF_SHA256: ${{ steps.trusted-controls.outputs.verify_release_ref_sha256 }}
         run: |
-          .github/scripts/verify-release-ref.ps1 -RefreshRemote `
-            -ExpectedCommitSha $env:FFB_RELEASE_COMMIT
+          if ($env:FFB_TRUSTED_VERIFY_RELEASE_REF_SHA256 -cnotmatch '^[A-F0-9]{64}$' -or
+              -not (Test-Path -LiteralPath $env:FFB_TRUSTED_VERIFY_RELEASE_REF -PathType Leaf) -or
+              (Get-FileHash -LiteralPath $env:FFB_TRUSTED_VERIFY_RELEASE_REF -Algorithm SHA256).Hash `
+                -cne $env:FFB_TRUSTED_VERIFY_RELEASE_REF_SHA256) {
+            throw 'Trusted release-ref verifier failed SHA-256 verification.'
+          }
+          $verifyArguments = @{ RefreshRemote = $true; ExpectedCommitSha = $env:FFB_RELEASE_COMMIT }
+          if ($env:FFB_RELEASE_STATE -ne 'draft-recovery') {
+            $verifyArguments.RequireMasterHead = $true
+          }
+          & $env:FFB_TRUSTED_VERIFY_RELEASE_REF @verifyArguments
       - name: Require successful checks for the exact tagged commit
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          FFB_TRUSTED_WAIT_REQUIRED_CHECKS: ${{ steps.trusted-controls.outputs.wait_required_checks }}
+          FFB_TRUSTED_WAIT_REQUIRED_CHECKS_SHA256: ${{ steps.trusted-controls.outputs.wait_required_checks_sha256 }}
         run: |
-          .github/scripts/wait-required-checks.ps1 `
+          if ($env:FFB_TRUSTED_WAIT_REQUIRED_CHECKS_SHA256 -cnotmatch '^[A-F0-9]{64}$' -or
+              -not (Test-Path -LiteralPath $env:FFB_TRUSTED_WAIT_REQUIRED_CHECKS -PathType Leaf) -or
+              (Get-FileHash -LiteralPath $env:FFB_TRUSTED_WAIT_REQUIRED_CHECKS -Algorithm SHA256).Hash `
+                -cne $env:FFB_TRUSTED_WAIT_REQUIRED_CHECKS_SHA256) {
+            throw 'Trusted exact-check waiter failed SHA-256 verification.'
+          }
+          & $env:FFB_TRUSTED_WAIT_REQUIRED_CHECKS `
             -Repository $env:GITHUB_REPOSITORY `
             -CommitSha (git rev-parse HEAD).Trim()
       - name: Scan complete history before publishing
@@ -92,6 +283,8 @@ jobs:
           enable-cache: false
       - name: Build unsigned experimental assets
         shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
         run: .github/scripts/package-release.ps1
       - name: Attest build provenance
         uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
@@ -101,14 +294,55 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          FFB_RELEASE_STATE: ${{ steps.release-preflight.outputs.release_state }}
+          FFB_RELEASE_COMMIT: ${{ steps.bind-release.outputs.commit_sha }}
+          FFB_EXPECTED_RELEASE_ID: ${{ steps.release-preflight.outputs.release_id }}
+          FFB_TRUSTED_RELEASE_API: ${{ steps.trusted-controls.outputs.release_api }}
+          FFB_TRUSTED_RELEASE_API_SHA256: ${{ steps.trusted-controls.outputs.release_api_sha256 }}
+          FFB_TRUSTED_PUBLISHER: ${{ steps.trusted-controls.outputs.publisher }}
+          FFB_TRUSTED_PUBLISHER_SHA256: ${{ steps.trusted-controls.outputs.publisher_sha256 }}
+          FFB_TRUSTED_VERIFY_RELEASE_REF: ${{ steps.trusted-controls.outputs.verify_release_ref }}
+          FFB_TRUSTED_VERIFY_RELEASE_REF_SHA256: ${{ steps.trusted-controls.outputs.verify_release_ref_sha256 }}
         run: |
-          .github/scripts/verify-release-ref.ps1 -RefreshRemote `
-            -ExpectedCommitSha $env:FFB_RELEASE_COMMIT
-          .github/scripts/publish-release-assets.ps1 `
-            -AssetsDirectory release `
-            -Tag $env:RELEASE_TAG `
-            -Repository $env:GITHUB_REPOSITORY `
-            -Title "$env:RELEASE_TAG — 未簽章實驗版" `
-            -NotesPath '.github/release-notes.md' `
-            -ChannelNotice 'UNSIGNED EXPERIMENTAL — 未簽章實驗版；只代表指令遙測，不是馬達扭力。' `
-            -Prerelease
+          foreach ($trustedFile in @(
+            @{ Path = $env:FFB_TRUSTED_RELEASE_API; Sha256 = $env:FFB_TRUSTED_RELEASE_API_SHA256 },
+            @{ Path = $env:FFB_TRUSTED_PUBLISHER; Sha256 = $env:FFB_TRUSTED_PUBLISHER_SHA256 },
+            @{ Path = $env:FFB_TRUSTED_VERIFY_RELEASE_REF; Sha256 = $env:FFB_TRUSTED_VERIFY_RELEASE_REF_SHA256 }
+          )) {
+            if ($trustedFile.Sha256 -cnotmatch '^[A-F0-9]{64}$' -or
+                -not (Test-Path -LiteralPath $trustedFile.Path -PathType Leaf) -or
+                (Get-FileHash -LiteralPath $trustedFile.Path -Algorithm SHA256).Hash -cne $trustedFile.Sha256) {
+              throw "Trusted release control failed SHA-256 verification: $($trustedFile.Path)"
+            }
+          }
+          $verifyArguments = @{
+            RefreshRemote = $true
+            ExpectedCommitSha = $env:FFB_RELEASE_COMMIT
+          }
+          if ($env:FFB_RELEASE_STATE -ne 'draft-recovery') {
+            $verifyArguments.RequireMasterHead = $true
+          }
+          & $env:FFB_TRUSTED_VERIFY_RELEASE_REF @verifyArguments
+          $publisherArguments = @{
+            AssetsDirectory = 'release'
+            Tag = $env:RELEASE_TAG
+            Repository = $env:GITHUB_REPOSITORY
+            ExpectedAssetNames = @(
+              'ffb-proxy-x64.zip'
+              'ffb-proxy-x86.zip'
+              'ffb-viewer-x64.zip'
+              "ffb-interceptor-visualizer-$env:RELEASE_TAG-source.zip"
+              'sbom.cdx.json'
+              'sbom.spdx.json'
+              'python-environment.cdx.json'
+              'python-environment.spdx.json'
+              'SHA256SUMS'
+            )
+            Title = "$env:RELEASE_TAG — 未簽章實驗版"
+            NotesPath = '.github/release-notes.md'
+            ChannelNotice = 'UNSIGNED EXPERIMENTAL — 未簽章實驗版；只代表指令遙測，不是馬達扭力。'
+            Prerelease = $true
+          }
+          $publisherArguments.ExpectedReleaseId = [long]$env:FFB_EXPECTED_RELEASE_ID
+          & $env:FFB_TRUSTED_PUBLISHER @publisherArguments
