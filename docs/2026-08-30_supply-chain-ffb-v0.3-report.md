@@ -146,19 +146,20 @@ DependentLoadFlags 只保護 PE 靜態匯入，不會自動約束所有執行期
 
 ### E-004
 - title: 最終未簽章 Experimental SimHub 與 Launcher 套件通過雙 PowerShell lifecycle 與目的地邊界
-- observed_at: 2026-08-31T10:48:00+08:00
+- observed_at: 2026-08-31T17:02:00+08:00
 - source_type: artifact_and_command
-- source_ref: build/v0.3-final-packages-20260831-final；simhub/tools/Test-SimHubPackage.ps1；simhub/tools/Test-LauncherPackage.ps1
-- content_hash: Launcher SHA-256 92D3EDC3A24AD4403968154C2E697837769C045285DB2C9CD75EEBF852A87079；SimHub SHA-256 D574B834332A384FC9099643F4432F9E386E4FE6822148842EC151EDF1F23549
-- artifact_path: build/v0.3-final-packages-20260831-final
+- source_ref: build/v0.3-final-packages-20260831-final-r7；simhub/tools/Test-SimHubPackage.ps1；simhub/tools/Test-LauncherPackage.ps1
+- content_hash: Launcher SHA-256 D9909EEC3FADEF5882CE808E2511A21EE9470CE3ED65D1DCD484F8EEA0D7F82E；SimHub SHA-256 B9A89A9653A755859CCE6E909E4A4226C9247AC354D79086C621021B0136113C
+- artifact_path: build/v0.3-final-packages-20260831-final-r7
 - repro_command: |
-    ./simhub/tools/Test-SimHubPackage.ps1 -PackagePath build/v0.3-final-packages-20260831-final/FFBInterceptor-SimHub-0.3.0.zip
-    ./simhub/tools/Test-LauncherPackage.ps1 -PackagePath build/v0.3-final-packages-20260831-final/FFBInterceptor-Launcher-0.3.0.zip
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File simhub/tools/Test-SimHubPackage.ps1 -PackagePath build/v0.3-final-packages-20260831-final/FFBInterceptor-SimHub-0.3.0.zip
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File simhub/tools/Test-LauncherPackage.ps1 -PackagePath build/v0.3-final-packages-20260831-final/FFBInterceptor-Launcher-0.3.0.zip
+    ./simhub/tools/Test-SimHubPackage.ps1 -PackagePath build/v0.3-final-packages-20260831-final-r7/FFBInterceptor-SimHub-0.3.0.zip
+    ./simhub/tools/Test-LauncherPackage.ps1 -PackagePath build/v0.3-final-packages-20260831-final-r7/FFBInterceptor-Launcher-0.3.0.zip
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File simhub/tools/Test-SimHubPackage.ps1 -PackagePath build/v0.3-final-packages-20260831-final-r7/FFBInterceptor-SimHub-0.3.0.zip
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File simhub/tools/Test-LauncherPackage.ps1 -PackagePath build/v0.3-final-packages-20260831-final-r7/FFBInterceptor-Launcher-0.3.0.zip
 - raw_excerpt: |
-    SimHub ZIP 115902 bytes，SHA-256 D574B834332A384FC9099643F4432F9E386E4FE6822148842EC151EDF1F23549。
-    Launcher ZIP 630281 bytes，SHA-256 92D3EDC3A24AD4403968154C2E697837769C045285DB2C9CD75EEBF852A87079。
+    SimHub ZIP 327858 bytes，SHA-256 B9A89A9653A755859CCE6E909E4A4226C9247AC354D79086C621021B0136113C。
+    Launcher ZIP 1345453 bytes，SHA-256 D9909EEC3FADEF5882CE808E2511A21EE9470CE3ED65D1DCD484F8EEA0D7F82E。
+    相同來源與原生輸入在另一個全新輸出目錄重建後，兩個 ZIP 的 bytes 與 SHA-256 完全相同；所有 ZIP entry 使用固定時間、ordinal path order 與手寫 classic ZIP stored records，避開 PS5／PS7 Deflate 差異。
     PowerShell 7 與 Windows PowerShell 5.1 四次最終套件驗證均通過。
     Fixtures 驗證跨程序 mutation lease、不同 SimHub path 拒絕、raw DOS 子目錄 alias 拒絕、SimHub EXE 缺少時仍可依受保護 state 解除，以及任何 SimHub process 存在時 fail-closed。
     可觀察安全 Manager stub 必須收到零參數與正確 cwd 的原子 sentinel；略過 Start-Process 會逾時失敗。
@@ -369,10 +370,10 @@ DependentLoadFlags 只保護 PE 靜態匯入，不會自動約束所有執行期
 
 ### 7.4 套件、安裝器與 Release 控制
 
-    ./simhub/tools/Test-SimHubPackage.ps1 -PackagePath build/v0.3-final-packages-20260831-final/FFBInterceptor-SimHub-0.3.0.zip
-    ./simhub/tools/Test-LauncherPackage.ps1 -PackagePath build/v0.3-final-packages-20260831-final/FFBInterceptor-Launcher-0.3.0.zip
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File simhub/tools/Test-SimHubPackage.ps1 -PackagePath build/v0.3-final-packages-20260831-final/FFBInterceptor-SimHub-0.3.0.zip
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File simhub/tools/Test-LauncherPackage.ps1 -PackagePath build/v0.3-final-packages-20260831-final/FFBInterceptor-Launcher-0.3.0.zip
+    ./simhub/tools/Test-SimHubPackage.ps1 -PackagePath build/v0.3-final-packages-20260831-final-r7/FFBInterceptor-SimHub-0.3.0.zip
+    ./simhub/tools/Test-LauncherPackage.ps1 -PackagePath build/v0.3-final-packages-20260831-final-r7/FFBInterceptor-Launcher-0.3.0.zip
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File simhub/tools/Test-SimHubPackage.ps1 -PackagePath build/v0.3-final-packages-20260831-final-r7/FFBInterceptor-SimHub-0.3.0.zip
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File simhub/tools/Test-LauncherPackage.ps1 -PackagePath build/v0.3-final-packages-20260831-final-r7/FFBInterceptor-Launcher-0.3.0.zip
 
     ./tests/powershell/release_gate_tests.ps1
     ./tests/powershell/release_preflight_tests.ps1
@@ -408,6 +409,8 @@ DependentLoadFlags 只保護 PE 靜態匯入，不會自動約束所有執行期
 | 2026-08-31 10:20 | 完成 repository_dispatch、draft recovery、Stable secret 隔離與憑證清除 hardening | E-005：PS7／PS5 fixtures、actionlint、zizmor 通過 |
 | 2026-08-31 10:43 | 用唯一暫存 code-signing PFX 驗證正常與匯入後失敗清除 | E-005：CurrentUser/My、private key、subject 與暫存 PFX 最終殘留 0 |
 | 2026-08-31 10:48 | 重建並驗證最終 Experimental SimHub／Launcher ZIP | E-004：PS7／PS5 套件 lifecycle 與目的地 fixtures 通過 |
+| 2026-08-31 11:08 | 修正 ZIP entry 時間／排序並在兩個全新目錄重建 | E-004：兩組 SimHub／Launcher ZIP SHA-256 分別完全相同 |
+| 2026-08-31 17:02 | 完成跨 PS5／PS7 stored ZIP、原子 publish、rollback 與競態複核後再次雙重重建 | E-004：final-r7／repro-r7 bytes 相同，PS7／PS5／Python／7-Zip 驗證通過 |
 
 ## 10. 結論
 

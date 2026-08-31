@@ -7,8 +7,8 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-Add-Type -AssemblyName System.IO.Compression.FileSystem
 Add-Type -AssemblyName System.Drawing
+. (Join-Path $PSScriptRoot 'ArchiveHelpers.ps1')
 
 function New-DashboardPreview {
     param([string]$Name, [string]$Destination)
@@ -110,8 +110,8 @@ $dashboards = @(
 foreach ($name in $dashboards) {
     $definition = Join-Path $sourceDirectory ($name + '.djson')
     $metadata = $definition + '.metadata'
-    Get-Content -LiteralPath $definition -Raw | ConvertFrom-Json | Out-Null
-    Get-Content -LiteralPath $metadata -Raw | ConvertFrom-Json | Out-Null
+    Get-Content -LiteralPath $definition -Raw -Encoding UTF8 | ConvertFrom-Json | Out-Null
+    Get-Content -LiteralPath $metadata -Raw -Encoding UTF8 | ConvertFrom-Json | Out-Null
 
     $temporaryRoot = [System.IO.Path]::GetFullPath(
         (Join-Path ([System.IO.Path]::GetTempPath()) ('ffb-interceptor-dashboard-' + [Guid]::NewGuid().ToString('N'))))
@@ -135,12 +135,18 @@ foreach ($name in $dashboards) {
         if (-not $package.StartsWith($resolvedOutput, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Unsafe output path: $package"
         }
-        if (Test-Path -LiteralPath $package) { Remove-Item -LiteralPath $package -Force }
-        [System.IO.Compression.ZipFile]::CreateFromDirectory(
-            $temporaryRoot,
-            $package,
-            [System.IO.Compression.CompressionLevel]::Optimal,
-            $false)
+        $partialPackage = $package + '.' + [Guid]::NewGuid().ToString('N') + '.partial'
+        try {
+            New-CanonicalZipArchive -SourceDirectory $temporaryRoot -DestinationPath $partialPackage
+            $validatedHash = Get-LockedFileSha256 -Path $partialPackage
+            [void](Publish-ValidatedArchive -PartialPath $partialPackage `
+                -DestinationPath $package -ExpectedSha256 $validatedHash)
+        }
+        finally {
+            if (Test-Path -LiteralPath $partialPackage -PathType Leaf) {
+                Remove-Item -LiteralPath $partialPackage -Force
+            }
+        }
         Write-Host "Built $package"
     }
     finally {

@@ -16,6 +16,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'ArchiveHelpers.ps1')
 
 function Resolve-RequiredFile {
     param([Parameter(Mandatory = $true)][string]$Path, [Parameter(Mandatory = $true)][string]$Description)
@@ -196,32 +197,24 @@ try {
     )
     [IO.File]::WriteAllLines((Join-Path $bundleRoot 'SHA256SUMS.txt'), $manifestLines, [Text.UTF8Encoding]::new($false))
 
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = Assert-ChildPath -Parent $resolvedOutput -Child (Join-Path $resolvedOutput ($bundleName + '.zip'))
     $partialArchive = Assert-ChildPath -Parent $resolvedOutput -Child `
         (Join-Path $resolvedOutput ($bundleName + '.' + [Guid]::NewGuid().ToString('N') + '.partial.zip'))
-    $previousArchive = ''
     try {
-        [IO.Compression.ZipFile]::CreateFromDirectory(
-            $bundleRoot, $partialArchive, [IO.Compression.CompressionLevel]::Optimal, $true)
+        New-CanonicalZipArchive -SourceDirectory $bundleRoot `
+            -DestinationPath $partialArchive -IncludeBaseDirectory
+        $validatedHash = Get-LockedFileSha256 -Path $partialArchive
         & (Join-Path $PSScriptRoot 'Test-LauncherPackage.ps1') -PackagePath $partialArchive
         if ($LASTEXITCODE -ne 0) { throw 'Launcher package validation failed.' }
-        if (Test-Path -LiteralPath $archive -PathType Leaf) {
-            $previousArchive = Assert-ChildPath -Parent $resolvedOutput -Child `
-                (Join-Path $resolvedOutput ($bundleName + '.' + [Guid]::NewGuid().ToString('N') + '.previous.zip'))
-            [IO.File]::Replace($partialArchive, $archive, $previousArchive, $true)
-            Remove-Item -LiteralPath $previousArchive -Force
-            $previousArchive = ''
+        $postValidationHash = Get-LockedFileSha256 -Path $partialArchive
+        if ($postValidationHash -cne $validatedHash) {
+            throw 'Launcher package bytes changed while they were being validated.'
         }
-        else {
-            [IO.File]::Move($partialArchive, $archive)
-        }
+        [void](Publish-ValidatedArchive -PartialPath $partialArchive `
+            -DestinationPath $archive -ExpectedSha256 $validatedHash)
     }
     finally {
         if (Test-Path -LiteralPath $partialArchive) { Remove-Item -LiteralPath $partialArchive -Force }
-        if ($previousArchive -and (Test-Path -LiteralPath $previousArchive)) {
-            Remove-Item -LiteralPath $previousArchive -Force
-        }
     }
     Write-Host "Built $archive"
 }

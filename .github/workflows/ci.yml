@@ -102,6 +102,7 @@ jobs:
             'simhub\launcher-portable\Uninstall-SimHubPlugin.ps1',
             'simhub\launcher-portable\Start-FFBInterceptor.ps1',
             'simhub\tools\Build-LauncherPackage.ps1',
+            'simhub\tools\ArchiveHelpers.ps1',
             'simhub\tools\Test-LauncherPackage.ps1',
             'simhub\tools\Build-SimHubPackage.ps1',
             'simhub\tools\Test-SimHubPackage.ps1',
