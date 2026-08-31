@@ -97,7 +97,8 @@ try {
     Copy-Item -LiteralPath $probe -Destination $stagedProbe
 
     $net = Join-Path ([Environment]::SystemDirectory) 'net.exe'
-    & $net user $accountName $password /add /active:yes /expires:never /passwordchg:no | Out-Null
+    & $net user $accountName $password /add /active:yes /expires:never `
+        /passwordchg:no /passwordreq:yes /Y | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "Could not create the ephemeral standard-user account (exit $LASTEXITCODE)."
     }
