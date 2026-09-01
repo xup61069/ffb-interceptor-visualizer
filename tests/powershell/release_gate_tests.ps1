@@ -110,18 +110,18 @@ foreach ($workflowSource in @($baseWorkflow, $fullWorkflow)) {
     # part of the environment-variable drive-qualified name. Build the
     # refspec with the format operator so both source and destination retain
     # the validated tag exactly.
-    if ($workflowSource.IndexOf(
-            '$tagRef = ''refs/tags/{0}'' -f $env:RELEASE_TAG',
-            [StringComparison]::Ordinal) -lt 0 -or
-        $workflowSource.IndexOf(
-            '$tagRefspec = ''+{0}:{0}'' -f $tagRef',
-            [StringComparison]::Ordinal) -lt 0 -or
-        $workflowSource.IndexOf(
-            'git fetch --force --no-tags origin $tagRefspec',
-            [StringComparison]::Ordinal) -lt 0 -or
-        $workflowSource.IndexOf(
-            '$env:RELEASE_TAG:refs',
-            [StringComparison]::Ordinal) -ge 0) {
+    $tagRefIndex = $workflowSource.IndexOf(
+        '$tagRef = ''refs/tags/{0}'' -f $env:RELEASE_TAG',
+        [StringComparison]::Ordinal)
+    $tagRefspecIndex = $workflowSource.IndexOf(
+        '$tagRefspec = ''+{0}:{0}'' -f $tagRef',
+        [StringComparison]::Ordinal)
+    $tagFetchIndex = $workflowSource.IndexOf(
+        'git fetch --force --no-tags origin $tagRefspec',
+        [StringComparison]::Ordinal)
+    if ($tagRefIndex -lt 0 -or $tagRefspecIndex -le $tagRefIndex -or
+        $tagFetchIndex -le $tagRefspecIndex -or
+        [regex]::IsMatch($workflowSource, '\$env:[A-Za-z_][A-Za-z0-9_]*:')) {
         throw 'release workflow does not construct its tag refspec without ambiguous environment-variable interpolation'
     }
 
@@ -199,11 +199,6 @@ foreach ($workflowSource in @($baseWorkflow, $fullWorkflow)) {
         throw 'post-checkout release revalidation is not bound to the original state and numeric ID'
     }
 }
-$fixtureTagRef = 'refs/tags/{0}' -f 'v0.3.0'
-$fixtureTagRefspec = '+{0}:{0}' -f $fixtureTagRef
-if ($fixtureTagRefspec -cne '+refs/tags/v0.3.0:refs/tags/v0.3.0') {
-    throw 'release tag refspec formatter did not preserve the exact tag on both sides'
-}
 if ($fullWorkflow -notmatch 'github\.event\.client_payload\.channel' -or
     $fullWorkflow -notmatch 'id:\s+validated-payload' -or
     $fullWorkflow -notmatch '"simhub_install_path=\$normalisedSimHubPath"' -or
@@ -280,9 +275,21 @@ try {
     git init --bare $refOrigin | Out-Null
     git -C $refWork remote add origin $refOrigin
     git -C $refWork push origin master --tags | Out-Null
+    $env:RELEASE_TAG = 'v0.3.0'
+    $fixtureTagRef = 'refs/tags/{0}' -f $env:RELEASE_TAG
+    $fixtureTagRefspec = '+{0}:{0}' -f $fixtureTagRef
+    if ($fixtureTagRefspec -cne '+refs/tags/v0.3.0:refs/tags/v0.3.0') {
+        throw 'release tag refspec formatter did not preserve the exact tag on both sides'
+    }
+    $expectedFixtureTagCommit = (git -C $refWork rev-list -n 1 $env:RELEASE_TAG).Trim()
+    git -C $refWork tag --delete $env:RELEASE_TAG | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'fixture could not remove its local release tag before fetch' }
     git -C $refWork fetch --force --no-tags origin $fixtureTagRefspec
     if ($LASTEXITCODE -ne 0) { throw 'formatted release tag refspec was rejected by git fetch' }
-    $env:RELEASE_TAG = 'v0.3.0'
+    $fetchedFixtureTagCommit = (git -C $refWork rev-list -n 1 $env:RELEASE_TAG).Trim()
+    if ($fetchedFixtureTagCommit -cne $expectedFixtureTagCommit) {
+        throw 'formatted release tag refspec did not restore the exact destination tag commit'
+    }
     Push-Location $refWork
     try {
         $boundSha = & '.github\scripts\verify-release-ref.ps1' `
