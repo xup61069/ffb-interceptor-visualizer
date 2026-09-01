@@ -106,6 +106,25 @@ foreach ($workflowSource in @($baseWorkflow, $fullWorkflow)) {
         throw 'release workflow is missing its repository-dispatch payload or exact-SHA binding contract'
     }
 
+    # A colon immediately after $env:RELEASE_TAG is parsed by PowerShell as
+    # part of the environment-variable drive-qualified name. Build the
+    # refspec with the format operator so both source and destination retain
+    # the validated tag exactly.
+    $tagRefIndex = $workflowSource.IndexOf(
+        '$tagRef = ''refs/tags/{0}'' -f $env:RELEASE_TAG',
+        [StringComparison]::Ordinal)
+    $tagRefspecIndex = $workflowSource.IndexOf(
+        '$tagRefspec = ''+{0}:{0}'' -f $tagRef',
+        [StringComparison]::Ordinal)
+    $tagFetchIndex = $workflowSource.IndexOf(
+        'git fetch --force --no-tags origin $tagRefspec',
+        [StringComparison]::Ordinal)
+    if ($tagRefIndex -lt 0 -or $tagRefspecIndex -le $tagRefIndex -or
+        $tagFetchIndex -le $tagRefspecIndex -or
+        [regex]::IsMatch($workflowSource, '\$env:[A-Za-z_][A-Za-z0-9_]*:')) {
+        throw 'release workflow does not construct its tag refspec without ambiguous environment-variable interpolation'
+    }
+
     foreach ($requiredFragment in @(
         'id: trusted-controls',
         'id: release-preflight',
@@ -257,6 +276,20 @@ try {
     git -C $refWork remote add origin $refOrigin
     git -C $refWork push origin master --tags | Out-Null
     $env:RELEASE_TAG = 'v0.3.0'
+    $fixtureTagRef = 'refs/tags/{0}' -f $env:RELEASE_TAG
+    $fixtureTagRefspec = '+{0}:{0}' -f $fixtureTagRef
+    if ($fixtureTagRefspec -cne '+refs/tags/v0.3.0:refs/tags/v0.3.0') {
+        throw 'release tag refspec formatter did not preserve the exact tag on both sides'
+    }
+    $expectedFixtureTagCommit = (git -C $refWork rev-list -n 1 $env:RELEASE_TAG).Trim()
+    git -C $refWork tag --delete $env:RELEASE_TAG | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'fixture could not remove its local release tag before fetch' }
+    git -C $refWork fetch --force --no-tags origin $fixtureTagRefspec
+    if ($LASTEXITCODE -ne 0) { throw 'formatted release tag refspec was rejected by git fetch' }
+    $fetchedFixtureTagCommit = (git -C $refWork rev-list -n 1 $env:RELEASE_TAG).Trim()
+    if ($fetchedFixtureTagCommit -cne $expectedFixtureTagCommit) {
+        throw 'formatted release tag refspec did not restore the exact destination tag commit'
+    }
     Push-Location $refWork
     try {
         $boundSha = & '.github\scripts\verify-release-ref.ps1' `

@@ -142,7 +142,9 @@ jobs:
         run: |
           git fetch --force --no-tags origin '+refs/heads/master:refs/remotes/origin/master'
           if ($LASTEXITCODE -ne 0) { throw 'Unable to refresh origin/master before binding the release ref.' }
-          git fetch --force --no-tags origin "+refs/tags/$env:RELEASE_TAG:refs/tags/$env:RELEASE_TAG"
+          $tagRef = 'refs/tags/{0}' -f $env:RELEASE_TAG
+          $tagRefspec = '+{0}:{0}' -f $tagRef
+          git fetch --force --no-tags origin $tagRefspec
           if ($LASTEXITCODE -ne 0) { throw "Unable to refresh release tag $env:RELEASE_TAG." }
           $headCommit = (git rev-parse HEAD).Trim().ToLowerInvariant()
           $masterCommit = (git rev-parse refs/remotes/origin/master).Trim().ToLowerInvariant()
