@@ -1,4 +1,5 @@
 name: Full SimHub release
+run-name: Full release ${{ github.event.client_payload.tag }} (${{ github.event.client_payload.channel }})
 
 on:
   repository_dispatch:
@@ -18,8 +19,9 @@ jobs:
   build:
     name: sdk-package-attest-and-publish
     if: ${{ github.event_name == 'repository_dispatch' && github.ref == 'refs/heads/master' }}
+    timeout-minutes: 120
     environment: stable-signing
-    runs-on: [self-hosted, Windows, X64, simhub-sdk, ephemeral]
+    runs-on: [self-hosted, Windows, X64, simhub-sdk, ephemeral, ffb-release]
     permissions:
       actions: read # inspect workflow checks for the tagged commit
       checks: read # inspect check runs for the tagged commit
@@ -302,13 +304,24 @@ jobs:
         env:
           SIMHUB_INSTALL_PATH: ${{ steps.validated-payload.outputs.simhub_install_path }}
         run: simhub/tools/Test-SimHubSdk.ps1 -SimHubInstallPath $env:SIMHUB_INSTALL_PATH
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.13'
       - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
         with:
           version: '0.12.5'
+          python-version: '3.13.15'
           enable-cache: false
+          cache-local-path: '${{ runner.temp }}\uv-cache'
+      - name: Install isolated uv-managed Python
+        shell: pwsh
+        run: |
+          $pythonRoot = [IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP 'uv-python'))
+          [IO.Directory]::CreateDirectory($pythonRoot) | Out-Null
+          $env:UV_PYTHON_INSTALL_DIR = $pythonRoot
+          "UV_PYTHON_INSTALL_DIR=$pythonRoot" |
+            Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+          uv python install 3.13.15
+          if ($LASTEXITCODE -ne 0) { throw 'uv-managed Python 3.13 installation failed.' }
+          uv python find 3.13.15 --managed-python
+          if ($LASTEXITCODE -ne 0) { throw 'uv-managed Python 3.13 was not found after installation.' }
       - name: Configure unsigned Full experimental channel
         if: ${{ github.event.client_payload.channel == 'experimental' }}
         shell: pwsh
@@ -338,6 +351,7 @@ jobs:
           }
           & $env:FFB_TRUSTED_IMPORT_SIGNING_CERTIFICATE -RequireSigning
       - name: Build channel-policy launcher, hook, manager, and tests
+        id: build-toolchain
         shell: pwsh
         env:
           RELEASE_CHANNEL: ${{ github.event.client_payload.channel }}
@@ -370,10 +384,21 @@ jobs:
             throw 'Stable Manager build requires the pinned signer SHA-256.'
           }
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          $vsroot = & $vswhere -latest -products * `
+          $vsroots = @(& $vswhere -latest `
+            -products Microsoft.VisualStudio.Product.BuildTools `
+            -version '[17.0,18.0)' `
             -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if ($LASTEXITCODE -ne 0 -or -not $vsroot) { throw 'Visual Studio C++ tools were not found.' }
+          )
+          if ($LASTEXITCODE -ne 0 -or $vsroots.Count -ne 1) {
+            throw 'Exactly one Visual Studio 2022 Build Tools installation with C++ tools is required.'
+          }
+          $vsroot = [IO.Path]::GetFullPath([string]$vsroots[0])
           $devcmd = Join-Path $vsroot 'Common7\Tools\VsDevCmd.bat'
+          if (-not (Test-Path -LiteralPath $devcmd -PathType Leaf)) {
+            throw 'Visual Studio 2022 Build Tools developer command script was not found.'
+          }
+          "visual_studio_install_path=$vsroot" |
+            Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           $stableValue = if ($stable) { 'ON' } else { 'OFF' }
           $signer = if ($stable) { $env:FFB_SIGNER_SHA256 } else { '' }
           foreach ($architecture in @('x64', 'x86')) {
@@ -394,6 +419,7 @@ jobs:
           SIMHUB_INSTALL_PATH: ${{ steps.validated-payload.outputs.simhub_install_path }}
           FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS: ${{ steps.trusted-controls.outputs.sign_windows_artifacts }}
           FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS_SHA256: ${{ steps.trusted-controls.outputs.sign_windows_artifacts_sha256 }}
+          FFB_VISUAL_STUDIO_INSTALL_PATH: ${{ steps.build-toolchain.outputs.visual_studio_install_path }}
         run: |
           $stable = $env:RELEASE_CHANNEL -eq 'stable'
           function Restore-FFBTrustedSigner {
@@ -418,7 +444,8 @@ jobs:
             }
           }
           if ($stable) { Restore-FFBTrustedSigner }
-          .github/scripts/package-release.ps1 -RequireSigning:$stable
+          .github/scripts/package-release.ps1 -RequireSigning:$stable `
+            -VisualStudioInstallPath $env:FFB_VISUAL_STUDIO_INSTALL_PATH
           $simhubPackageOutput = [IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP `
             ('ffb-simhub-release-' + [Guid]::NewGuid().ToString('N'))))
           $runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'

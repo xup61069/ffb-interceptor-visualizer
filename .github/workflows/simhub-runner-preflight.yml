@@ -1,0 +1,170 @@
+name: Full SimHub runner preflight
+run-name: Full runner preflight ${{ github.event.client_payload.commit }}
+
+on:
+  repository_dispatch:
+    types: [ffb-full-runner-preflight]
+
+concurrency:
+  group: full-runner-preflight-${{ github.event.client_payload.commit }}
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  preflight:
+    name: isolated-runner-build-and-package
+    if: ${{ github.event_name == 'repository_dispatch' && github.ref == 'refs/heads/master' }}
+    timeout-minutes: 120
+    runs-on: [self-hosted, Windows, X64, simhub-sdk, ephemeral, ffb-preflight]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: refs/heads/master
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate preflight payload and bind master
+        id: validated-payload
+        shell: pwsh
+        env:
+          FFB_CLIENT_PAYLOAD_JSON: ${{ toJson(github.event.client_payload) }}
+        run: |
+          $payload = $env:FFB_CLIENT_PAYLOAD_JSON | ConvertFrom-Json -ErrorAction Stop
+          $names = @($payload.PSObject.Properties | ForEach-Object Name | Sort-Object)
+          $expectedNames = @('commit', 'simhub_path')
+          if ($names.Count -ne $expectedNames.Count -or
+              (Compare-Object -ReferenceObject $expectedNames -DifferenceObject $names -CaseSensitive)) {
+            throw 'Runner preflight client_payload must contain exactly: commit, simhub_path.'
+          }
+          $commit = [string]$payload.commit
+          if ($commit -cnotmatch '^[0-9a-f]{40}\z') {
+            throw 'Runner preflight commit must be a complete lowercase Git SHA.'
+          }
+          $simHubPath = [string]$payload.simhub_path
+          if ([string]::IsNullOrWhiteSpace($simHubPath) -or $simHubPath.Length -gt 1024 -or
+              $simHubPath -notmatch '^[A-Za-z]:\\' -or
+              $simHubPath.IndexOfAny([IO.Path]::GetInvalidPathChars()) -ge 0 -or
+              $simHubPath.IndexOfAny([char[]]'*?') -ge 0) {
+            throw 'Runner preflight simhub_path must be a bounded absolute local drive path.'
+          }
+          $normalisedSimHubPath = [IO.Path]::GetFullPath($simHubPath)
+          git fetch --force --no-tags origin '+refs/heads/master:refs/remotes/origin/master'
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to refresh origin/master for runner preflight.' }
+          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $master = (git rev-parse refs/remotes/origin/master).Trim().ToLowerInvariant()
+          if ($head -cne $commit -or $master -cne $commit) {
+            throw "Runner preflight source mismatch: payload=$commit, HEAD=$head, master=$master"
+          }
+          "simhub_install_path=$normalisedSimHubPath" |
+            Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Verify isolated SimHub SDK fingerprint
+        shell: pwsh
+        env:
+          SIMHUB_INSTALL_PATH: ${{ steps.validated-payload.outputs.simhub_install_path }}
+        run: simhub/tools/Test-SimHubSdk.ps1 -SimHubInstallPath $env:SIMHUB_INSTALL_PATH
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: '0.12.5'
+          python-version: '3.13.15'
+          enable-cache: false
+          cache-local-path: '${{ runner.temp }}\uv-cache'
+      - name: Install isolated uv-managed Python
+        shell: pwsh
+        run: |
+          $pythonRoot = [IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP 'uv-python'))
+          [IO.Directory]::CreateDirectory($pythonRoot) | Out-Null
+          $env:UV_PYTHON_INSTALL_DIR = $pythonRoot
+          "UV_PYTHON_INSTALL_DIR=$pythonRoot" |
+            Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+          uv python install 3.13.15
+          if ($LASTEXITCODE -ne 0) { throw 'uv-managed Python 3.13 installation failed.' }
+          uv python find 3.13.15 --managed-python
+          if ($LASTEXITCODE -ne 0) { throw 'uv-managed Python 3.13 was not found after installation.' }
+      - name: Locate pinned Visual Studio 2022 Build Tools
+        id: build-toolchain
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vsroots = @(& $vswhere -latest `
+            -products Microsoft.VisualStudio.Product.BuildTools `
+            -version '[17.0,18.0)' `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          )
+          if ($LASTEXITCODE -ne 0 -or $vsroots.Count -ne 1) {
+            throw 'Exactly one Visual Studio 2022 Build Tools installation with C++ tools is required.'
+          }
+          $vsroot = [IO.Path]::GetFullPath([string]$vsroots[0])
+          $devcmd = Join-Path $vsroot 'Common7\Tools\VsDevCmd.bat'
+          if (-not (Test-Path -LiteralPath $devcmd -PathType Leaf)) {
+            throw 'Visual Studio 2022 Build Tools developer command script was not found.'
+          }
+          @(
+            "visual_studio_install_path=$vsroot",
+            "visual_studio_devcmd=$devcmd"
+          ) | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Build and test x64 and x86 trees
+        shell: pwsh
+        env:
+          FFB_VISUAL_STUDIO_DEVCMD: ${{ steps.build-toolchain.outputs.visual_studio_devcmd }}
+        run: |
+          foreach ($architecture in @('x64', 'x86')) {
+            $build = "build\$architecture-preflight"
+            $command = "call `"$env:FFB_VISUAL_STUDIO_DEVCMD`" -arch=$architecture >nul && " +
+              "cmake -S . -B $build -G Ninja -DCMAKE_BUILD_TYPE=Release " +
+              '-DFFB_STABLE_PACKAGE=OFF -DFFB_EXPECTED_SIGNER_SHA256= && ' +
+              "cmake --build $build --target all && ctest --test-dir $build --output-on-failure"
+            cmd.exe /d /c $command
+            if ($LASTEXITCODE -ne 0) { throw "$architecture preflight build or test failed." }
+          }
+      - name: Build and verify every unsigned Full package locally
+        shell: pwsh
+        env:
+          RELEASE_TAG: local
+          SIMHUB_INSTALL_PATH: ${{ steps.validated-payload.outputs.simhub_install_path }}
+          FFB_VISUAL_STUDIO_INSTALL_PATH: ${{ steps.build-toolchain.outputs.visual_studio_install_path }}
+          FFB_SIGNING_CERT_SHA1: ''
+          FFB_SIGNER_SHA256: ''
+        run: |
+          .github/scripts/package-release.ps1 `
+            -VisualStudioInstallPath $env:FFB_VISUAL_STUDIO_INSTALL_PATH
+          $outputRoot = [IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP `
+            ('ffb-full-preflight-' + [Guid]::NewGuid().ToString('N'))))
+          $tempPrefix = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'
+          if (-not $outputRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Unsafe Full preflight package directory.'
+          }
+          [IO.Directory]::CreateDirectory($outputRoot) | Out-Null
+          try {
+            $simHubOutput = Join-Path $outputRoot 'simhub'
+            $launcherOutput = Join-Path $outputRoot 'launcher'
+            simhub/tools/Build-SimHubPackage.ps1 `
+              -SimHubInstallPath $env:SIMHUB_INSTALL_PATH -OutputDirectory $simHubOutput
+            $simHubPackages = @(Get-ChildItem -LiteralPath $simHubOutput -File `
+              -Filter 'FFBInterceptor-SimHub-*.zip')
+            if ($simHubPackages.Count -ne 1) {
+              throw 'Runner preflight did not create exactly one SimHub package.'
+            }
+            simhub/tools/Test-SimHubPackage.ps1 -PackagePath $simHubPackages[0].FullName
+            simhub/tools/Build-LauncherPackage.ps1 `
+              -SimHubInstallPath $env:SIMHUB_INSTALL_PATH `
+              -LauncherX64Path 'build\x64-preflight\FFBInterceptor.Launcher.exe' `
+              -HookX64Path 'build\x64-preflight\FFBInterceptor.Hook.dll' `
+              -LauncherX86Path 'build\x86-preflight\FFBInterceptor.Launcher.exe' `
+              -HookX86Path 'build\x86-preflight\FFBInterceptor.Hook.dll' `
+              -ManagerX64Path 'build\x64-preflight\FFBInterceptor.Manager.exe' `
+              -OutputDirectory $launcherOutput
+            $launcherPackages = @(Get-ChildItem -LiteralPath $launcherOutput -File `
+              -Filter 'FFBInterceptor-Launcher-*.zip')
+            if ($launcherPackages.Count -ne 1) {
+              throw 'Runner preflight did not create exactly one Launcher package.'
+            }
+            simhub/tools/Test-LauncherPackage.ps1 -PackagePath $launcherPackages[0].FullName
+          }
+          finally {
+            if ($outputRoot.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase) -and
+                (Test-Path -LiteralPath $outputRoot)) {
+              Remove-Item -LiteralPath $outputRoot -Recurse -Force
+            }
+          }

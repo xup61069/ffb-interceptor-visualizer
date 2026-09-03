@@ -3,3 +3,5 @@ self-hosted-runner:
   labels:
     - simhub-sdk
     - ephemeral
+    - ffb-preflight
+    - ffb-release

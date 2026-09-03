@@ -1,4 +1,4 @@
-# FFB Interceptor + Visualizer 0.3.0（台灣繁體中文）
+# FFB Interceptor + Visualizer 1.0.0（台灣繁體中文）
 
 本檔是完整台灣中文使用說明。FFB Interceptor 觀察 DirectInput8 力回饋命令，將資料
 送到 SimHub 外掛或 Python 檢視器；它不會量到方向盤馬達實際扭力，也不能當反作弊、
@@ -10,7 +10,7 @@
 ## 即開即用首選
 
 1. 從 [GitHub Releases](https://github.com/xup61069/ffb-interceptor-visualizer/releases)
-   下載 `FFBInterceptor-Launcher-0.3.0.zip`。
+   下載 `FFBInterceptor-Launcher-1.0.0.zip`。
 2. 驗證 `SHA256SUMS`、Release 頻道與 provenance attestation，完整解壓縮 ZIP。
 3. 正常雙擊 `FFBInterceptor.Manager.exe`，不要用系統管理員身分啟動 Manager。
 4. 第一次選擇離線遊戲 EXE 與 SimHub 資料夾，按「安裝／更新插件」並接受安裝所需的
@@ -24,17 +24,20 @@ SimHub 必須安裝在實體固定本機磁碟；網路／卸除式磁碟、`SUB
 這個 Launcher ZIP 完全不含 `dinput8.dll`，也不會在遊戲目錄放置、覆寫或修改
 `dinput8.dll`。Manager 只會使用套件內固定架構的 Launcher／Hook，建立使用者選取的
 新遊戲子程序；不會附加既有 PID、選任意 DLL 或修改遊戲 EXE。若 Release 頁面沒有
-`FFBInterceptor-Launcher-0.3.0.zip`，表示只有 GitHub-hosted 基礎實驗版，尚未提供
+`FFBInterceptor-Launcher-1.0.0.zip`，表示只有 GitHub-hosted 基礎實驗版，尚未提供
 即開即用套件；`ffb-proxy-*.zip` 不是替代品。
 
 詳細按鈕、診斷、升級與解除安裝方式見
-[Manager 操作說明](launcher/MANAGER.zh-TW.md)。
+[Manager 操作說明](launcher/MANAGER.zh-TW.md)，版本差異見 [變更紀錄](CHANGELOG.md)。
 
 ## 套件信任政策
 
+`v1.0.0` 是首個 1.x 產品版本，不代表資產已簽章；實際信任政策要看 Release 頁面標示的
+Stable／Experimental。
+
 | 頻道 | 實際政策 |
 | --- | --- |
-| Stable | 以 fail-closed Manager 建置。執行中 Manager 與 manifest 內所有 `.exe`、`.dll`、`.ps1`、`.psm1` 都要驗證；目前 Launcher allowlist 合計 11 個簽章 payload。全部必須通過 Authenticode 信任鏈及撤銷檢查、同一 signer，並符合建置時釘選的憑證 SHA-256，否則拒絕安裝與啟動。流程已實作，但儲存庫不宣稱目前已有公信簽章憑證、所需 self-hosted runner 或已發布 Stable 資產。 |
+| Stable | 以 fail-closed Manager 建置。執行中 Manager 與 manifest 內所有 `.exe`、`.dll`、`.ps1`、`.psm1` 都要驗證；目前 Launcher allowlist 合計 11 個簽章 payload。全部必須通過 Authenticode 信任鏈及撤銷檢查、同一 signer，並符合建置時釘選的憑證 SHA-256，否則拒絕安裝與啟動。流程已實作，但儲存庫不宣稱目前已有公信簽章憑證或已發布 Stable 資產。 |
 | Experimental | 兩條公開發行流程都固定不簽章，也完全不讀 Stable 的簽章 secrets；Manager 會明確警告。套件內 `SHA256SUMS.txt` 的精確檔案清單與 SHA-256 仍是硬性閘門；使用者另須從官方 Release 核對外層 `SHA256SUMS`，並用 `gh attestation verify <檔案> --repo xup61069/ffb-interceptor-visualizer` 驗證外部 provenance。Attestation 不等於 Authenticode。 |
 
 Manager 會拒絕缺檔、多檔、重複或跳脫路徑、reparse point、雜湊錯誤、遊戲／Hook
@@ -58,7 +61,7 @@ Proxy、Hook、Launcher 與 Manager 使用靜態 MSVC CRT，並設定
 
 ## 削峰模型：同裝置保守加總、跨裝置不相加
 
-v0.3.0 的 `ConservativeAbsoluteSumPerDevice` 模型，會對同一來源／session 中每一個
+v1.0.0 的 `ConservativeAbsoluteSumPerDevice` 模型，會對同一來源／session 中每一個
 DirectInput 裝置分別計算：將當下播放且可建模的 Constant、Ramp、Periodic 效果取
 瞬時絕對值，在同一 `DeviceId` 內加總，再取各裝置中最大的總和。
 
@@ -86,7 +89,7 @@ Protocol v1 有 TriggerButton 設定，卻沒有即時按鍵狀態，所以無�
 ## SimHub 9.11.22 exact fingerprint
 
 外掛只對指紋精確相符的已安裝 SimHub SDK 建置；SimHub 自有 DLL 不會被放入 Release。
-v0.3.0 相容矩陣目前只有下列 profile（紀錄日期 2026-08-30）：
+v1.0.0 相容矩陣目前只有下列 profile（紀錄日期 2026-08-30）：
 
 | 檔案 | 位元組 | SHA-256 |
 | --- | ---: | --- |
@@ -128,12 +131,13 @@ v0.3.0 相容矩陣目前只有下列 profile（紀錄日期 2026-08-30）：
 Hosted Experimental 基礎發行只有 Proxy x86／x64、Viewer x64、source、四份 SBOM 與
 `SHA256SUMS`。只有 labels 完整符合
 `[self-hosted, Windows, X64, simhub-sdk, ephemeral]` 的完整流程，才會再產生
-`FFBInterceptor-SimHub-0.3.0.zip` 與 `FFBInterceptor-Launcher-0.3.0.zip`。
+`FFBInterceptor-SimHub-1.0.0.zip` 與 `FFBInterceptor-Launcher-1.0.0.zip`。
 
-截至 2026-08-31，GitHub 已啟用 immutable releases；tag ruleset `21893944` 會保護
+截至 2026-09-03，GitHub 已啟用 immutable releases；tag ruleset `21893944` 會保護
 `refs/tags/v*`，禁止更新或刪除；`stable-signing` environment 只允許 `master`，並由
-`xup61069` 審核。目前仍沒有可用的一次性 ephemeral runner、公信程式碼簽章憑證與
-對應 secrets，也沒有實體方向盤／商業遊戲測試證據。完整細節見
+`xup61069` 審核。完整發行只使用按工作臨時註冊、完成後自動退役的一次性 runner；目前
+仍沒有公信程式碼簽章憑證與對應 secrets，也沒有實體方向盤／商業遊戲測試證據，不能
+把未簽章 Full 資產宣稱為 Stable。完整細節見
 [發行流程](docs/release-process.md)。
 
 ## 支援限制
@@ -145,8 +149,7 @@ Hosted Experimental 基礎發行只有 Proxy x86／x64、Viewer x64、source、�
   不在完整安全邊界內。遙測失敗不會阻斷原始 DirectInput 呼叫。
 - 傳統 Proxy 模式仍供開發／相容性研究，但不是首選。不要覆寫遊戲既有
   `dinput8.dll`；先備份並確認可還原。
-- 目前沒有可宣稱的公信簽章憑證與 secrets、一次性 ephemeral SimHub runner、實體
-  高扭力方向盤或完整商業遊戲測試證據。
+- 目前沒有可宣稱的公信簽章憑證與 secrets、實體高扭力方向盤或完整商業遊戲測試證據。
 
 ## 開發者建置
 
@@ -155,13 +158,13 @@ cmake --preset msvc-x64-release
 cmake --build --preset x64-release --target dinput8 ffb_hook ffb_launcher ffb_manager
 ctest --test-dir build/x64-release --output-on-failure
 
-simhub\tools\Test-SimHubSdk.ps1 -SimHubInstallPath 'C:\Program Files (x86)\SimHub'
-simhub\tools\Build-SimHubPackage.ps1
-simhub\tools\Build-LauncherPackage.ps1
+pwsh -File simhub\tools\Test-SimHubSdk.ps1 -SimHubInstallPath 'C:\Program Files (x86)\SimHub'
+pwsh -File simhub\tools\Build-SimHubPackage.ps1
+pwsh -File simhub\tools\Build-LauncherPackage.ps1
 ```
 
-x86 請在 `VsDevCmd.bat -arch=x86` 環境獨立建置。Python viewer 需求為 Python 3.12+
-與 uv：
+x86 請在 `VsDevCmd.bat -arch=x86` 環境獨立建置；SimHub 封裝腳本需求為 PowerShell 7
+（`pwsh`）。Python viewer 需求為 Python 3.12+ 與 uv：
 
 ```powershell
 cd viewer

@@ -1,4 +1,4 @@
-# v0.3.0 發行流程
+# v1.0.0 發行流程
 
 本專案有兩條公開發行路徑：GitHub-hosted 的「基礎 Experimental」與具有真實 SimHub
 SDK 的「完整 self-hosted」。兩者都只能針對既有 `vX.Y.Z` tag，且都會等待 tag 所在
@@ -119,7 +119,7 @@ self-hosted，再呼叫唯一一條 workflow。PowerShell 範例：
 ```powershell
 @{
   event_type = 'ffb-experimental-base-release'
-  client_payload = @{ tag = 'v0.3.0' }
+  client_payload = @{ tag = 'v1.0.0' }
 } | ConvertTo-Json -Depth 3 | gh api --method POST `
   repos/xup61069/ffb-interceptor-visualizer/dispatches --input -
 ```
@@ -146,7 +146,7 @@ self-hosted，再呼叫唯一一條 workflow。PowerShell 範例：
 
 - `ffb-proxy-x86.zip`、`ffb-proxy-x64.zip`；
 - `ffb-viewer-x64.zip`；
-- `ffb-interceptor-visualizer-v0.3.0-source.zip`（其他版本依 tag 更換版本段）；
+- `ffb-interceptor-visualizer-v1.0.0-source.zip`（其他版本依 tag 更換版本段）；
 - `sbom.cdx.json`（CycloneDX 1.6 component SBOM）；
 - `sbom.spdx.json`（SPDX 2.3 component SBOM）；
 - `python-environment.cdx.json`；
@@ -166,6 +166,30 @@ dependency graph，以及 SimHub SDK build-time-only exact fingerprint 產生；
 
 工作流程：`.github/workflows/simhub-sdk-release.yml`（顯示名稱 `Full SimHub release`）
 
+正式建立不可移動的 tag 前，先以 `.github/workflows/simhub-runner-preflight.yml` 對專用的
+`[self-hosted, Windows, X64, simhub-sdk, ephemeral, ffb-preflight]` labels 跑一次不含 secrets、
+只有 `contents: read` 的完整本機建置／封裝預檢。
+payload 只接受預期的 master 40 位 commit SHA 與隔離 SimHub SDK 路徑；預檢會驗證
+master 綁定、SDK 指紋、uv-managed Python、x86／x64 全部測試，以及 SimHub／Launcher
+套件，但不建立 tag、attestation 或 Release。預檢 runner 完成一個 job 後必須退役；
+正式發布另用全新 profile 與全新 `--ephemeral` runner，不能重用預檢工作目錄。
+
+預檢 dispatch 的 payload 必須剛好包含凍結的 master SHA 與私有 SDK snapshot：
+
+```powershell
+@{
+  event_type = 'ffb-full-runner-preflight'
+  client_payload = @{
+    commit = '<40 位小寫 master SHA>'
+    simhub_path = '<隔離 profile 內的 SimHub SDK snapshot 絕對路徑>'
+  }
+} | ConvertTo-Json -Depth 3 | gh api --method POST `
+  repos/xup61069/ffb-interceptor-visualizer/dispatches --input -
+```
+
+預檢通過後必須凍結 master；推 tag 前再次確認 `origin/master` 仍等於預檢 SHA。正式發行
+runner 另加 `ffb-release` label，不能帶 `ffb-preflight`，避免兩種 queued job 互搶。
+
 只接受 `repository_dispatch` 事件 `ffb-full-release`。payload 必須剛好包含：
 
 - `tag`：既有且位於 master 的 canonical `vX.Y.Z` tag；
@@ -178,7 +202,7 @@ PowerShell 範例：
 @{
   event_type = 'ffb-full-release'
   client_payload = @{
-    tag = 'v0.3.0'
+    tag = 'v1.0.0'
     channel = 'experimental'
     simhub_path = 'C:\Program Files (x86)\SimHub'
   }
@@ -189,7 +213,7 @@ PowerShell 範例：
 job 綁定 `stable-signing` environment，且只會排到精確 labels：
 
 ```yaml
-runs-on: [self-hosted, Windows, X64, simhub-sdk, ephemeral]
+runs-on: [self-hosted, Windows, X64, simhub-sdk, ephemeral, ffb-release]
 ```
 
 流程依序：
@@ -206,7 +230,7 @@ runs-on: [self-hosted, Windows, X64, simhub-sdk, ephemeral]
    編譯與 publisher 前停止。未知檔名、duplicate/API/state mismatch 或 immutable draft 都
    fail-closed，且不刪除或修改遠端內容。
 3. 第二次 checkout 被驗證的 tag SHA，重驗版本並等待同一 exact commit 的 11 個 checks。
-4. 執行 `simhub/tools/Test-SimHubSdk.ps1`。v0.3.0 只接受
+4. 執行 `simhub/tools/Test-SimHubSdk.ps1`。v1.0.0 只接受
    `simhub/sdk-compatibility.json` 中 SimHub 9.11.22 的四檔 exact length＋SHA-256；
    少檔、長度不同或 digest 不同都停止。SimHub 自有 DLL 不會進入套件。
 5. 只有 `stable` channel 才由 trusted snapshot 的 import script 讀取 `WINDOWS_SIGNING_PFX_BASE64`、密碼與
@@ -215,14 +239,17 @@ runs-on: [self-hosted, Windows, X64, simhub-sdk, ephemeral]
    在有效期內，且 leaf certificate DER 的 SHA-256 完全符合釘選值。PFX 內每張憑證的
    thumbprint 都會被追蹤；若 `CurrentUser\My` 已存在其中任一張就停止，避免沿用前次
    中斷的身分。`experimental` channel 固定未簽章，完全不引用這三個 secrets。
-6. 以 Visual Studio C++ tools 對 x64、x86 各自執行 `cmake --build ... --target all`
+6. 以鎖版 `setup-uv` 將 uv-managed Python 3.13 安裝到 runner 暫存區，不使用 Windows
+   self-hosted 首次安裝時需要管理員權限的 `setup-python`；再以 Visual Studio 2022
+   Build Tools 對 x64、x86 各自執行
+   `cmake --build ... --target all`
    與完整 CTest。Stable 加入 `FFB_STABLE_PACKAGE=ON` 與
    `FFB_EXPECTED_SIGNER_SHA256=<64 hex>`；Experimental 則為 OFF。
 7. 建立基礎資產。SimHub builder 在 `RUNNER_TEMP` 下的唯一隔離目錄執行，必須恰好
-   產生一個 `FFBInterceptor-SimHub-0.3.0.zip` 才複製到 `release/`，finally 一律刪除
+   產生一個 `FFBInterceptor-SimHub-1.0.0.zip` 才複製到 `release/`，finally 一律刪除
    隔離目錄；兩個 standalone `.simhubdash` 不會成為 Release asset。接著建立含 x86／
    x64 Launcher／Hook、x64 Manager、Core、SimHub adapter、Dashboard／Overlay 的
-   `FFBInterceptor-Launcher-0.3.0.zip`。最後重算涵蓋除 checksum 檔自身之外所有外層
+   `FFBInterceptor-Launcher-1.0.0.zip`。最後重算涵蓋除 checksum 檔自身之外所有外層
    資產的 `SHA256SUMS`。
 8. Stable 以 SHA-256 Authenticode 加 RFC 3161 timestamp 簽署 Proxy、Viewer、
    Manager、4 個 PowerShell 腳本、兩種架構 Launcher／Hook、Core／SimHub adapter；
@@ -256,30 +283,37 @@ MSVC 原生目標使用靜態 CRT，Proxy、Hook、Launcher 與 Manager 另以
 
 ### GitHub 已設定與仍缺少的外部條件
 
-截至 2026-08-31，GitHub 儲存庫端已完成：
+截至 2026-09-03，GitHub 儲存庫端已完成：
 
 - 啟用 immutable releases；
 - 啟用 tag ruleset `21893944`，保護 `refs/tags/v*`，禁止更新與刪除；
 - 建立 `stable-signing` environment，只允許 `master` 部署，必要 reviewer 為
   `xup61069`。
 
-仍未具備、不可假裝已完成的項目：
+完整發行的外部執行條件與仍未具備的項目：
 
-- labels 完全相符、每次 job 後銷毀且不重用磁碟／使用者 profile 的 ephemeral
-  self-hosted Windows x64 runner；該 runner 還必須安裝符合 exact fingerprint 的
-  SimHub 9.11.22；
+- Full job 只使用發版前臨時註冊、labels 完全相符，且工作完成後立即退役並清除工作目錄
+  的 ephemeral self-hosted Windows x64 runner；該 runner 必須安裝符合 exact
+  fingerprint 的 SimHub 9.11.22。`ephemeral` label 本身不是銷毀證明，維護者仍須保留
+  註冊、退役與清理證據；
 - 公信 Windows code-signing PFX、對應 private key、密碼與釘選 SHA-256 secrets；
 - 實體方向盤或商業遊戲測試台。
 
 `repository_dispatch` 固定使用 default branch workflow，再加上
 `if: github.ref == 'refs/heads/master'` 與精確 payload 驗證，構成 workflow 內的入口 gate；
 真正保護簽章 secrets 的外部邊界是 `stable-signing` environment 的 deployment branch
-policy 與 reviewer。PFX 仍會暫時匯入 runner 的 `CurrentUser\My`；正常或可捕捉的失敗
-會用 `-DeleteKey` 清理，但主機斷電／runner crash 無法保證 cleanup，因此 `ephemeral`
-必須代表 job 後直接銷毀整個 runner，而不是只加 label 的長期共用主機。
+policy 與 reviewer。Full Experimental 可使用持續存在的 Windows 主機，但只能在沒有
+預存 `gh auth` 登入狀態、PAT、SSH 私鑰、個人憑證或瀏覽器登入的專用非管理員帳號中
+執行；runner 仍須以 `config.cmd --ephemeral` 做單次註冊。工作後須驗證
+GitHub 已退役 runner 並清除專用 runner／work 目錄，且 Release 說明必須揭露這只是
+邏輯清理，不等同一次性 VM 或安全抹除。Stable 的 PFX 會暫時匯入 runner 的
+`CurrentUser\My`；正常或可捕捉的失敗會用 `-DeleteKey` 清理，但主機斷電／runner crash
+無法保證 cleanup，因此 Stable 必須在 job 後直接銷毀整個 VM／磁碟／使用者 profile，
+不能只在長期共用主機加上 `ephemeral` label。
 
-沒有這些外部條件時，只能產生 hosted Experimental 基礎資產，不能把它稱為完整 Stable。
-發行說明不可捏造 runner、簽章或硬體測試已完成。
+沒有第一項 runner／SDK 時，新的 Full job 不會執行，只能產生 hosted Experimental 基礎
+資產；沒有公信簽章條件時，Full 只能標示 Experimental，不能稱為 Stable。發行說明
+不可捏造 runner、退役清理、簽章或硬體測試已完成。
 
 immutable-releases 設定屬於 repository Administration 權限，workflow 內建的
 `GITHUB_TOKEN` 無法要求這個額外權限。維護者必須在送出 dispatch 前，用具有該儲存庫
@@ -385,8 +419,8 @@ marker 外的維護者備註。Release 一旦公開且 immutable，只接受內�
 從乾淨 clone 重現基礎封裝：
 
 ```powershell
-git checkout v0.3.0
-$env:RELEASE_TAG = 'v0.3.0'
+git checkout v1.0.0
+$env:RELEASE_TAG = 'v1.0.0'
 .github\scripts\verify-release-ref.ps1
 .github\scripts\package-release.ps1
 ```
@@ -395,9 +429,9 @@ $env:RELEASE_TAG = 'v0.3.0'
 Stable。完整套件另需：
 
 ```powershell
-simhub\tools\Test-SimHubSdk.ps1 -SimHubInstallPath 'C:\Program Files (x86)\SimHub'
-simhub\tools\Build-SimHubPackage.ps1
-simhub\tools\Build-LauncherPackage.ps1
+pwsh -File simhub\tools\Test-SimHubSdk.ps1 -SimHubInstallPath 'C:\Program Files (x86)\SimHub'
+pwsh -File simhub\tools\Build-SimHubPackage.ps1
+pwsh -File simhub\tools\Build-LauncherPackage.ps1
 simhub\tools\Test-SimHubPackage.ps1 -PackagePath <SimHub-ZIP>
 simhub\tools\Test-LauncherPackage.ps1 -PackagePath <Launcher-ZIP>
 ```

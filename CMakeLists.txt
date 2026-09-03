@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-only
 cmake_minimum_required(VERSION 3.20)
-project(ffb_interceptor VERSION 0.3.0 LANGUAGES CXX)
+project(ffb_interceptor VERSION 1.0.0 LANGUAGES CXX)
 
 option(FFB_STABLE_PACKAGE
     "Require trusted Authenticode signatures for Manager package actions" OFF)

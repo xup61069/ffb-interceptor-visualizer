@@ -3,7 +3,7 @@
 `FFBInterceptor.Manager.exe` 是原生 Windows 視窗程式，不需要安裝 .NET，也不依賴 SimHub SDK。它只會建立使用者選定的新遊戲程序，再呼叫套件內固定架構的 `FFBInterceptor.Launcher.exe` 與 `FFBInterceptor.Hook.dll`；不會附加到已執行程序，也不會把 `dinput8.dll` 寫進遊戲資料夾。
 
 以下是 Manager 的封裝能力與頻道政策，不表示目前已有公開 Stable 資產。本儲存庫目前
-不宣稱已配置公信程式碼簽章憑證、所需 self-hosted runner 或已發布 Stable；建立或推送
+不宣稱已配置公信程式碼簽章憑證或已發布 Stable；建立或推送
 tag 也不會自動發布，維護者必須從預設分支送出對應的 `repository_dispatch` 事件。
 
 ## 第一次使用

@@ -1,18 +1,18 @@
-# FFB Interceptor v0.3.0 不改遊戲 DLL 一鍵版
+# FFB Interceptor v1.0.0 不改遊戲 DLL 一鍵版
 
 > **僅供離線／單機測試。**不提供反作弊規避、受保護遊戲或線上競技支援。
 >
 > **高扭力安全警告：**方向盤可能突然動作。第一次啟動前先把 gain 調到最低、讓手部
 > 遠離轉動範圍並準備實體急停。本工具只觀察與轉送命令，不是硬體安全控制器。
 
-`FFBInterceptor-Launcher-0.3.0.zip` 的建議入口是原生視窗程式
+`FFBInterceptor-Launcher-1.0.0.zip` 的建議入口是原生視窗程式
 `FFBInterceptor.Manager.exe`。它會協助安裝／更新 SimHub 外掛、記住多個離線遊戲設定、
 診斷環境並一鍵啟動。ZIP **不含 `dinput8.dll`**，Manager 路徑也不會寫入遊戲資料夾。
 
 ## 先確認發行通道
 
 以下兩個頻道是封裝政策，不代表目前已有公開 Stable 資產。本儲存庫目前不宣稱已配置
-公信程式碼簽章憑證、所需 self-hosted runner 或已發布 Stable。建立或推送 tag 不會自動
+公信程式碼簽章憑證或已發布 Stable。建立或推送 tag 不會自動
 發布；維護者必須從預設分支送出對應且欄位精確的 `repository_dispatch` 事件。
 
 - **穩定版：**必要 EXE、DLL 與 PowerShell 腳本必須通過 Windows Authenticode 信任鏈
@@ -103,7 +103,7 @@ helper 會先重鎖、重驗整包，再用不繼承呼叫端 .NET startup／mod
 所以這是「不修改遊戲磁碟檔案」，不是「程序記憶體完全不變」。若你改用傳統 proxy
 套件，該路徑會把 `dinput8.dll` 放到遊戲旁，兩者不可混為一談。
 
-## v0.3.0 Dashboard 數值怎麼看
+## v1.0.0 Dashboard 數值怎麼看
 
 削峰判定使用同一 DirectInput 裝置內所有可建模效果的**瞬時命令絕對值和**，再取命令
 最大的裝置。不同裝置不相加；同裝置也不推測方向向量抵消，因此這是可能高估、但避免
@@ -145,7 +145,7 @@ producer 掉幀、同 session 重連或狀態容量超限也會令 `DataReliable
 
 ## SimHub 版本與 SDK 限制
 
-v0.3.0 的支援矩陣目前只有 **SimHub 9.11.22 的一組精確 SDK 指紋**。發布流程會比對
+v1.0.0 的支援矩陣目前只有 **SimHub 9.11.22 的一組精確 SDK 指紋**。發布流程會比對
 `GameReaderCommon.dll`、`log4net.dll`、`SimHub.Logging.dll` 與 `SimHub.Plugins.dll` 的
 檔案長度和 SHA-256；任一不同就拒絕建立可發布外掛。相近或較新的版本不代表已相容，
 目前都屬未列入支援矩陣。這些 SimHub 自有 DLL 不會隨包重新散布。
