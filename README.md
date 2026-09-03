@@ -1,4 +1,4 @@
-# FFB Interceptor + Visualizer 0.3.0
+# FFB Interceptor + Visualizer 1.0.0
 
 FFB Interceptor 會觀察遊戲送出的 DirectInput8 力回饋「命令」，把資料送到 SimHub
 外掛或獨立 Python 檢視器。它不會量到方向盤基座／馬達的實際扭力，也不是反作弊、
@@ -12,7 +12,7 @@ FFB Interceptor 會觀察遊戲送出的 DirectInput8 力回饋「命令」，�
 一般使用者不必自己建置，也不必把任何 DLL 放進遊戲資料夾。
 
 1. 到 [GitHub Releases](https://github.com/xup61069/ffb-interceptor-visualizer/releases)，
-   下載 `FFBInterceptor-Launcher-0.3.0.zip`。不要下載名稱含 `source` 或
+   下載 `FFBInterceptor-Launcher-1.0.0.zip`。不要下載名稱含 `source` 或
    `ffb-proxy` 的檔案來代替它。
 2. 驗證 Release 頻道、`SHA256SUMS` 與來源證明後，把整個 ZIP 解壓縮到本機固定
    資料夾；不要直接在壓縮檔預覽視窗內執行。
@@ -33,16 +33,20 @@ junction 或其他 reparse 路徑會被拒絕，避免 UAC 驗證後目的路徑
 記憶體中接上 `DirectInput8Create`，不修改遊戲 EXE 或遊戲資料夾。
 
 完整 Launcher ZIP 只能由具有指紋相符之 SimHub SDK 的完整發行流程產生。如果某個
-Release 頁面沒有 `FFBInterceptor-Launcher-0.3.0.zip`，代表該次只有 GitHub-hosted
+Release 頁面沒有 `FFBInterceptor-Launcher-1.0.0.zip`，代表該次只有 GitHub-hosted
 基礎實驗版資產，尚未提供即開即用的 Manager 套件；請勿把 Proxy ZIP 當成替代品。
 
-更詳細的 Manager 操作見 [即開即用管理器說明](launcher/MANAGER.zh-TW.md)。
+更詳細的 Manager 操作見 [即開即用管理器說明](launcher/MANAGER.zh-TW.md)，版本差異見
+[變更紀錄](CHANGELOG.md)。
 
 ## Stable 與 Experimental 要怎麼分
 
+`v1.0.0` 是首個 1.x 產品版本；它不等於「已簽章」。Release 頁面標示的
+Stable／Experimental 才是簽章與啟動政策，兩者不可混為一談。
+
 | 頻道 | 啟動規則 | 使用者應做的驗證 |
 | --- | --- | --- |
-| Stable（穩定版） | Manager 以 fail-closed 政策建置。它會驗證執行中 Manager，以及 manifest 內所有 `.exe`、`.dll`、`.ps1`、`.psm1`；目前 Launcher allowlist 合計 11 個簽章 payload。全部必須通過 Windows Authenticode 信任鏈與撤銷檢查、使用同一簽署者，並符合建置時釘選的憑證 SHA-256；任一項失敗就拒絕安裝與啟動。 | 先在 Windows 檔案內容確認數位簽章，再核對 `SHA256SUMS`。Stable 流程已實作，但本儲存庫不宣稱目前已擁有公信程式碼簽章憑證、可用的專屬 runner，或已發布 Stable 資產。 |
+| Stable（穩定版） | Manager 以 fail-closed 政策建置。它會驗證執行中 Manager，以及 manifest 內所有 `.exe`、`.dll`、`.ps1`、`.psm1`；目前 Launcher allowlist 合計 11 個簽章 payload。全部必須通過 Windows Authenticode 信任鏈與撤銷檢查、使用同一簽署者，並符合建置時釘選的憑證 SHA-256；任一項失敗就拒絕安裝與啟動。 | 先在 Windows 檔案內容確認數位簽章，再核對 `SHA256SUMS`。Stable 流程已實作，但本儲存庫不宣稱目前已擁有公信程式碼簽章憑證或已發布 Stable 資產。 |
 | Experimental（實驗版） | 兩條公開發行流程的 Experimental 都固定不簽章，也完全不讀 Stable 的簽章 secrets。Manager 仍會嚴格驗證套件內 `SHA256SUMS.txt`、必要檔案、精確清單與逐檔 SHA-256，但不把 Authenticode 當成啟動門檻，介面會顯示警告。 | 從官方 Release 下載，核對外層 `SHA256SUMS`，並在執行前以 GitHub CLI 的 `gh attestation verify <檔案> --repo xup61069/ffb-interceptor-visualizer` 驗證 provenance attestation。Attestation 不是 Authenticode，也不能取代解壓後的逐檔雜湊。 |
 
 Manager 啟動或安裝前還會確認套件沒有缺檔、多檔、重複／跳脫路徑、reparse point
@@ -67,7 +71,7 @@ Proxy、Hook、Launcher 與 Manager 使用靜態 MSVC CRT，並設定
 
 ## 削峰偵測的白話定義
 
-v0.3.0 使用 `ConservativeAbsoluteSumPerDevice`（同裝置絕對值保守加總）：
+v1.0.0 使用 `ConservativeAbsoluteSumPerDevice`（同裝置絕對值保守加總）：
 
 - 對同一來源／session 內，每一個 DirectInput 裝置分開計算。當下正在播放且可建模的
   Constant、Ramp、Periodic 效果，會先取瞬時命令的絕對值，再在「同一裝置」內加總。
@@ -106,7 +110,7 @@ Condition 與 Custom 效果會列入不支援效果計數，但不會被硬猜�
 ## SimHub SDK 相容性指紋
 
 可安裝外掛只允許使用儲存庫列入矩陣的真實 SimHub SDK 建置，不會 vendoring 或重新
-散布 SimHub 自有組件。v0.3.0 目前只有 SimHub **9.11.22** 的 exact-length-and-SHA256
+散布 SimHub 自有組件。v1.0.0 目前只有 SimHub **9.11.22** 的 exact-length-and-SHA256
 profile（矩陣紀錄日期 2026-08-30）：
 
 | 檔案 | 位元組 | SHA-256 |
@@ -157,7 +161,7 @@ GitHub-hosted Experimental 基礎發行會產生：
 
 - `ffb-proxy-x86.zip`、`ffb-proxy-x64.zip`（傳統模式，不是首選）；
 - `ffb-viewer-x64.zip`；
-- `ffb-interceptor-visualizer-v0.3.0-source.zip`；
+- `ffb-interceptor-visualizer-v1.0.0-source.zip`；
 - `sbom.cdx.json`（CycloneDX 1.6）與 `sbom.spdx.json`（SPDX 2.3）；
 - `python-environment.cdx.json` 與 `python-environment.spdx.json`；
 - `SHA256SUMS` 與每個資產的 GitHub build-provenance attestation。
@@ -168,21 +172,22 @@ Core、SimHub adapter、Dashboards、Viewer）、`uv.lock` 中完整的 registry
 Python environment SBOM 則描述實際鎖定／安裝的 Python 發行套件；兩套都各有
 CycloneDX 與 SPDX 格式。
 
-完整 self-hosted 發行才會另外加入 `FFBInterceptor-SimHub-0.3.0.zip` 與首選的
-`FFBInterceptor-Launcher-0.3.0.zip`，runner labels 必須完整符合
+完整 self-hosted 發行才會另外加入 `FFBInterceptor-SimHub-1.0.0.zip` 與首選的
+`FFBInterceptor-Launcher-1.0.0.zip`，runner labels 必須完整符合
 `[self-hosted, Windows, X64, simhub-sdk, ephemeral]`。資產一旦同名上傳就不可由發行
 腳本覆寫。
 
-截至 2026-08-31，GitHub 已啟用 immutable releases；tag ruleset `21893944` 會保護
+截至 2026-09-03，GitHub 已啟用 immutable releases；tag ruleset `21893944` 會保護
 `refs/tags/v*`，禁止更新或刪除；`stable-signing` environment 只允許 `master`，並由
-`xup61069` 審核。目前仍沒有可用的一次性 ephemeral runner、公信程式碼簽章憑證與
-對應 secrets，也沒有實體方向盤／商業遊戲測試證據，因此不能宣稱已具備完整 Stable
-發行條件。操作與恢復規則見 [發行流程](docs/release-process.md)。
+`xup61069` 審核。完整發行只使用按工作臨時註冊、完成後自動退役的 ephemeral runner；
+目前仍沒有公信程式碼簽章憑證與對應 secrets，也沒有實體方向盤／商業遊戲測試證據，
+因此不能把未簽章 Full 資產宣稱為 Stable。操作與恢復規則見
+[發行流程](docs/release-process.md)。
 
 ## 支援範圍
 
 - 目前只支援透過 `DirectInput8Create` 建立的 x86／x64 DirectInput8 裝置。GameInput、
-  WinRT、XInput、私有 SDK 與驅動／HID Hook 不在 v0.3.0 範圍。
+  WinRT、XInput、私有 SDK 與驅動／HID Hook 不在 v1.0.0 範圍。
 - Launcher 模式只支援使用者明確選取、由它新建立的本機離線子程序；會拒絕系統目錄
   目標與提升權限執行。專案不提供任意 PID／DLL 注入、記憶體掃描或反作弊規避。
 - iRacing 明列為不支援項目；這是維護者的支援政策，不是 GPL 額外用途限制。
@@ -194,7 +199,8 @@ CycloneDX 與 SPDX 格式。
 
 ## 從原始碼建置
 
-需求為 Windows、Visual Studio C++ 工具、Windows SDK、CMake 3.20+ 與 Ninja。
+需求為 Windows、Visual Studio C++ 工具、Windows SDK、CMake 3.20+、Ninja 與
+PowerShell 7（`pwsh`；建置 SimHub 套件時使用）。
 
 ```powershell
 cmake --preset msvc-x64-release
@@ -206,9 +212,9 @@ x86 請在 `VsDevCmd.bat -arch=x86` 環境設定獨立的 `build/x86-release`。
 外掛與 Launcher ZIP 前，先用實際安裝的 SDK 驗證指紋：
 
 ```powershell
-simhub\tools\Test-SimHubSdk.ps1 -SimHubInstallPath 'C:\Program Files (x86)\SimHub'
-simhub\tools\Build-SimHubPackage.ps1
-simhub\tools\Build-LauncherPackage.ps1
+pwsh -File simhub\tools\Test-SimHubSdk.ps1 -SimHubInstallPath 'C:\Program Files (x86)\SimHub'
+pwsh -File simhub\tools\Build-SimHubPackage.ps1
+pwsh -File simhub\tools\Build-LauncherPackage.ps1
 ```
 
 獨立 Python viewer 需求為 Python 3.12+ 與 [uv](https://docs.astral.sh/uv/)：

@@ -34,6 +34,33 @@ try {
         -SimHubInstallPath $sdk -FingerprintPath $manifestPath
     if ($result -ne 'test-profile') { throw 'matching SDK fixture was not accepted' }
 
+    $defaultLayout = Join-Path $testRoot 'default-layout'
+    $defaultTools = Join-Path $defaultLayout 'tools'
+    [IO.Directory]::CreateDirectory($defaultTools) | Out-Null
+    $defaultScript = Join-Path $defaultTools 'Test-SimHubSdk.ps1'
+    Copy-Item -LiteralPath (Join-Path $root 'simhub\tools\Test-SimHubSdk.ps1') `
+        -Destination $defaultScript
+    Copy-Item -LiteralPath $manifestPath `
+        -Destination (Join-Path $defaultLayout 'sdk-compatibility.json')
+    $legacyOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $defaultScript `
+        -SimHubInstallPath $sdk 2>&1
+    if ($LASTEXITCODE -ne 0 -or (@($legacyOutput) -join "`n").Trim() -ne 'test-profile') {
+        throw 'default SDK fingerprint path did not work under Windows PowerShell'
+    }
+
+    $previousErrorPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $legacyBuildOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
+            (Join-Path $root 'simhub\tools\Build-SimHubPackage.ps1') 2>&1
+        $legacyBuildExitCode = $LASTEXITCODE
+    }
+    finally { $ErrorActionPreference = $previousErrorPreference }
+    if ($legacyBuildExitCode -eq 0 -or
+        (@($legacyBuildOutput) -join "`n") -notmatch 'requires PowerShell 7') {
+        throw 'SimHub package build did not reject Windows PowerShell with a clear diagnostic'
+    }
+
     [IO.File]::AppendAllText((Join-Path $sdk 'SimHub.Plugins.dll'), 'tampered')
     $rejected = $false
     try {

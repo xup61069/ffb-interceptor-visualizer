@@ -3,7 +3,7 @@
 param(
     [string]$Configuration = 'Release',
     [string]$SimHubInstallPath = 'C:\Program Files (x86)\SimHub',
-    [string]$SdkFingerprintPath = (Join-Path $PSScriptRoot '..\sdk-compatibility.json'),
+    [string]$SdkFingerprintPath = '',
     [string]$OutputDirectory = '',
     [string]$SigningCertificateThumbprint = $env:FFB_SIGNING_CERT_SHA1,
     [string]$TimestampUrl = 'http://timestamp.digicert.com',
@@ -12,10 +12,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    throw 'Build-SimHubPackage requires PowerShell 7 or newer; run it with pwsh.'
+}
 . (Join-Path $PSScriptRoot 'ArchiveHelpers.ps1')
 
 $simhubRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $simhubRoot '..'))
+if ([string]::IsNullOrWhiteSpace($SdkFingerprintPath)) {
+    $SdkFingerprintPath = Join-Path $simhubRoot 'sdk-compatibility.json'
+}
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $PSScriptRoot '..\dist'
 }

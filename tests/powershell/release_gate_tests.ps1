@@ -92,6 +92,7 @@ if (-not $invalidPfxFailed) { throw 'invalid signing PFX was not rejected' }
 
 $baseWorkflow = Get-Content -Raw -LiteralPath (Join-Path $root '.github\workflows\release.yml')
 $fullWorkflow = Get-Content -Raw -LiteralPath (Join-Path $root '.github\workflows\simhub-sdk-release.yml')
+$packageRelease = Get-Content -Raw -LiteralPath (Join-Path $root '.github\scripts\package-release.ps1')
 if ($baseWorkflow -notmatch 'types:\s*\[ffb-experimental-base-release\]' -or
     $fullWorkflow -notmatch 'types:\s*\[ffb-full-release\]' -or
     $baseWorkflow -match 'workflow_dispatch' -or $fullWorkflow -match 'workflow_dispatch') {
@@ -221,6 +222,32 @@ if ($fullWorkflow -notmatch 'if\s*\(\$env:RELEASE_CHANNEL\s+-eq\s+''stable''\)' 
 if ($fullWorkflow -notmatch 'environment:\s+stable-signing' -or
     $fullWorkflow -notmatch 'runs-on:\s*\[[^\]]*ephemeral[^\]]*\]') {
     throw 'Full release workflow is missing its protected environment or ephemeral runner contract'
+}
+foreach ($requiredFullOperationFragment in @(
+    'run-name: Full release ${{ github.event.client_payload.tag }} (${{ github.event.client_payload.channel }})',
+    'timeout-minutes: 120',
+    'id: build-toolchain',
+    '-products Microsoft.VisualStudio.Product.BuildTools',
+    '-version ''[17.0,18.0)''',
+    '"visual_studio_install_path=$vsroot"',
+    'FFB_VISUAL_STUDIO_INSTALL_PATH: ${{ steps.build-toolchain.outputs.visual_studio_install_path }}',
+    '-VisualStudioInstallPath $env:FFB_VISUAL_STUDIO_INSTALL_PATH'
+)) {
+    if ($fullWorkflow.IndexOf($requiredFullOperationFragment,
+            [StringComparison]::Ordinal) -lt 0) {
+        throw "Full release workflow is missing bounded runner/toolchain contract fragment: $requiredFullOperationFragment"
+    }
+}
+foreach ($requiredPackageToolchainFragment in @(
+    '[string]$VisualStudioInstallPath = ''''',
+    '-products *',
+    '-version ''[17.0,18.0)''',
+    'Resolve-Path -LiteralPath $VisualStudioInstallPath -ErrorAction Stop'
+)) {
+    if ($packageRelease.IndexOf($requiredPackageToolchainFragment,
+            [StringComparison]::Ordinal) -lt 0) {
+        throw "Base/Full package script is missing its Visual Studio 2022 selection contract: $requiredPackageToolchainFragment"
+    }
 }
 $stableStepMatch = [regex]::Match($fullWorkflow,
     '(?ms)^\s*- name: Load Stable release signing identity and policy\s*$.*?(?=^\s*- name:)')

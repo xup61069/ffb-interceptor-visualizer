@@ -1,4 +1,4 @@
-# FFB Interceptor SimHub v0.3.0 安裝、升級與移除
+# FFB Interceptor SimHub v1.0.0 安裝、升級與移除
 
 > **高扭力安全警告：**方向盤基座可能突然動作。第一次測試請先把 gain 調到最低、讓
 > 手部遠離轉動範圍並準備實體急停。本工具不是硬體安全控制器；Dashboard 顯示的是
@@ -8,16 +8,16 @@
 支援。
 
 下列檔名是完整 self-hosted 發行的預期資產，不表示目前已有公開穩定版。請先確認 Release
-頁面確實附有需要的 ZIP；本儲存庫目前不宣稱已配置公信程式碼簽章憑證、所需 runner 或
-已發布 Stable。建立或推送 tag 不會自動發布，維護者必須從預設分支送出對應且欄位精確的
+頁面確實附有需要的 ZIP；本儲存庫目前不宣稱已配置公信程式碼簽章憑證或已發布 Stable。
+建立或推送 tag 不會自動發布，維護者必須從預設分支送出對應且欄位精確的
 `repository_dispatch` 事件。
 
 ## 選擇套件
 
 | 套件 | 建議用途 | 是否寫入遊戲資料夾 |
 |---|---|---|
-| `FFBInterceptor-Launcher-0.3.0.zip` | **建議。**含一鍵 Manager、x86／x64 Launcher／Hook、SimHub 外掛與 Dashboard | 否；不含也不安裝 `dinput8.dll` |
-| `FFBInterceptor-SimHub-0.3.0.zip` | 只安裝 SimHub 外掛；producer 需另行提供 | 否 |
+| `FFBInterceptor-Launcher-1.0.0.zip` | **建議。**含一鍵 Manager、x86／x64 Launcher／Hook、SimHub 外掛與 Dashboard | 否；不含也不安裝 `dinput8.dll` |
+| `FFBInterceptor-SimHub-1.0.0.zip` | 只安裝 SimHub 外掛；producer 需另行提供 | 否 |
 | `FFBInterceptor-ReadyToUse-*.zip`／傳統 proxy | 舊式直接啟動或特殊部署 | 是；會在遊戲 EXE 旁管理 `dinput8.dll` |
 
 若你的要求是「不改遊戲 DLL」，請選 Launcher ZIP 與
@@ -25,7 +25,7 @@
 
 ## 建議安裝：一鍵 Manager
 
-1. 從可信的 v0.3.0 Release 下載 Launcher ZIP，先驗證 Release attestation 與外層
+1. 從可信的 v1.0.0 Release 下載 Launcher ZIP，先驗證 Release attestation 與外層
    checksum，再完整解壓到新的本機空資料夾。不要直接在 ZIP 內執行。
 2. 以一般使用者身分開啟 `FFBInterceptor.Manager.exe`，不要使用「以系統管理員身分
    執行」。Manager 是原生 Windows 視窗程式，不需要 .NET 或 SimHub SDK。
@@ -58,7 +58,7 @@ Manager 可保存多個遊戲設定檔並複製去識別化診斷；它不保存
 
 ## 只安裝 SimHub 外掛
 
-若使用 `FFBInterceptor-SimHub-0.3.0.zip`：
+若使用 `FFBInterceptor-SimHub-1.0.0.zip`：
 
 1. 關閉 SimHub。
 2. **建議改下載 Launcher ZIP**，正常開啟其中的 `FFBInterceptor.Manager.exe`，再按
@@ -105,7 +105,7 @@ DLL 放到遊戲 EXE 旁。這條路徑**會修改遊戲資料夾**，也可能�
 手動 proxy 安裝步驟為：先完成 SimHub 外掛安裝，再把與遊戲相同架構的本專案
 `dinput8.dll` 放到遊戲 EXE 旁。若已有同名 DLL，不要直接覆蓋；改用受管理安裝器或停止。
 
-## 升級 v0.3.x
+## 升級到 v1.x
 
 ### Manager／Launcher 路徑
 
@@ -164,7 +164,7 @@ Manager 無法保證還原純手動安裝前可能存在的同名檔案。已匯
 
 ## SimHub 9.11.22 精確 SDK 相容性
 
-v0.3.0 的可發布建置只接受 `sdk-compatibility.json` 中 **SimHub 9.11.22** 的精確 profile。
+v1.0.0 的可發布建置只接受 `sdk-compatibility.json` 中 **SimHub 9.11.22** 的精確 profile。
 `Test-SimHubSdk.ps1` 會比對下列 DLL 的檔案長度與 SHA-256：
 
 - `GameReaderCommon.dll`
@@ -186,7 +186,7 @@ v0.3.0 的可發布建置只接受 `sdk-compatibility.json` 中 **SimHub 9.11.22
 
 不要修改 manifest，也不要為實驗版關閉 SmartScreen 或防毒後硬闖。
 
-## v0.3.0 削峰判定摘要
+## v1.0.0 削峰判定摘要
 
 外掛對每個裝置分別計算正在輸出的可支援效果：Constant 使用當下 magnitude；Ramp 依
 播放時間在 start／end 間內插；Periodic（Square、Sine、Triangle、SawtoothUp、

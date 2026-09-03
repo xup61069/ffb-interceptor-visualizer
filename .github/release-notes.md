@@ -23,7 +23,7 @@ Launcher 套件完全不含、也不會在遊戲資料夾放置或修改 `dinput
 
 ## v{{VERSION}} 重點
 
-- 新增原生 Windows `FFBInterceptor.Manager.exe`：首次選遊戲／SimHub、插件安裝、最多
+- 完整 Launcher 套件提供原生 Windows `FFBInterceptor.Manager.exe`：首次選遊戲／SimHub、插件安裝、最多
   64 個遊戲設定檔、一鍵啟動、台灣中文結構化診斷、複製前遮罩 `%USERPROFILE%`、安全
   升級與解除安裝。設定檔只存路徑／偏好，不存秘密。
 - 啟動前驗證精確套件 allowlist、必要 manifest 項目、逐檔 SHA-256、路徑邊界、
@@ -99,10 +99,19 @@ SimHub build 的兩個 standalone `.simhubdash` 只存在於隔離暫存目錄�
 只複製唯一 SimHub ZIP，並在 finally 清掉暫存目錄，因此不會把 `.simhubdash` 當成
 獨立 Release asset。
 
-不要因為檔名列在說明中，就假設頁面一定已附上完整套件。`stable-signing`
+不要因為檔名列在說明中，就假設頁面一定已附上完整套件。只有資產清單真的出現上述
+兩個 ZIP，才表示完整 workflow 曾在 labels 相符的 runner 上完成；`ephemeral` label
+本身不是主機退役或清理證明，仍須以維護者保留的註冊、退役與清理紀錄確認。
+`stable-signing`
 environment 已限制只允許 `master`，reviewer 為 `xup61069`；但 Stable 另需公信
-code-signing PFX、釘選 signer 與成功簽章。目前仍沒有可用的一次性 ephemeral runner、
-公信簽章憑證／secrets 或實體硬體測試證據，不能用這份說明假裝這些條件已完成。
+code-signing PFX、釘選 signer 與成功簽章。沒有有效 Authenticode 的 Full 資產仍是
+Experimental；也不能用這份說明假裝已完成實體硬體／商業遊戲測試。
+
+若本版由持續使用的 Windows 主機建置，則使用的是專用非管理員帳號中的 GitHub
+`--ephemeral` 單次 runner；工作後會驗證 GitHub 退役並清除專用 runner／work 目錄。
+這是邏輯清理，不等同一次性 VM 或磁碟安全抹除。GitHub provenance 能連結資產、workflow
+與 commit，但不能證明主機來自全新映像或排除主機層污染；因此這類資產只會標示為未簽章
+Experimental，不能視為 Stable 或 Authenticode 供應鏈保證。
 
 ## 驗證
 

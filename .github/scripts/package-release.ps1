@@ -3,6 +3,7 @@
 param(
     [string]$SigningCertificateThumbprint = $env:FFB_SIGNING_CERT_SHA1,
     [string]$TimestampUrl = 'http://timestamp.digicert.com',
+    [string]$VisualStudioInstallPath = '',
     [switch]$RequireSigning
 )
 
@@ -60,8 +61,21 @@ function Assert-ZipEntries {
 }
 
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-$vsroot = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+if ([string]::IsNullOrWhiteSpace($VisualStudioInstallPath)) {
+    $vsroot = & $vswhere -latest -products * `
+        -version '[17.0,18.0)' `
+        -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($vsroot)) {
+        throw 'Visual Studio C++ tools were not found.'
+    }
+}
+else {
+    $vsroot = (Resolve-Path -LiteralPath $VisualStudioInstallPath -ErrorAction Stop).Path
+}
 $devcmd = Join-Path $vsroot 'Common7/Tools/VsDevCmd.bat'
+if (-not (Test-Path -LiteralPath $devcmd -PathType Leaf)) {
+    throw 'Visual Studio developer command script was not found.'
+}
 cmd.exe /d /c "call `"$devcmd`" -arch=x64 >nul && cmake --preset msvc-x64-release && cmake --build --preset x64-release --target dinput8"
 if ($LASTEXITCODE -ne 0) { throw 'x64 proxy build failed.' }
 cmd.exe /d /c "call `"$devcmd`" -arch=x86 >nul && cmake -S . -B build/x86-release -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build/x86-release --target dinput8"

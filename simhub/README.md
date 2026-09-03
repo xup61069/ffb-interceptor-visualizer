@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
-# FFB Interceptor SimHub v0.3.0
+# FFB Interceptor SimHub v1.0.0
 
 `FFBInterceptor.SimHub` 是 .NET Framework 4.8 的 SimHub 外掛，透過
 `\\.\pipe\ffb-interceptor-simhub-v1` 接收 DirectInput8 FFB 命令遙測。既有 Python
@@ -12,7 +12,7 @@ viewer 繼續使用原本的 pipe，兩者可以同時執行。
 本專案只支援離線／單機測試，不提供反作弊規避、隱匿、任意程序注入或線上競技支援。
 削峰結果代表遊戲送出的 DirectInput 命令接近上限，**不是實際馬達扭力**。
 
-## v0.3.0 重點
+## v1.0.0 重點
 
 - Launcher ZIP 內提供原生視窗版 `FFBInterceptor.Manager.exe`，可安裝／更新 SimHub
   外掛、管理多個遊戲設定檔、啟動 SimHub、做環境診斷及一鍵啟動遊戲。
@@ -27,7 +27,7 @@ viewer 繼續使用原本的 pipe，兩者可以同時執行。
 
 ## 建議使用方式：一鍵 Manager
 
-1. 從可信的 v0.3.0 Release 取得 `FFBInterceptor-Launcher-0.3.0.zip`，完整解壓到新的本機
+1. 從可信的 v1.0.0 Release 取得 `FFBInterceptor-Launcher-1.0.0.zip`，完整解壓到新的本機
    資料夾；不要直接在 ZIP 內執行，也不要混入其他檔案。
 2. 以一般使用者身分雙擊 `FFBInterceptor.Manager.exe`。Manager 本身不需要 .NET 或
    SimHub SDK，也不要用「以系統管理員身分執行」。
@@ -59,7 +59,7 @@ Manager 會驗證 `SHA256SUMS.txt`、精確檔案清單、每個檔案雜湊、�
 
 ### 安裝
 
-優先使用上一節的 Manager。若只取得 `FFBInterceptor-SimHub-0.3.0.zip`，請關閉
+優先使用上一節的 Manager。若只取得 `FFBInterceptor-SimHub-1.0.0.zip`，請關閉
 SimHub，核對 Release checksum／attestation，並確認目標資料夾內確實有
 `SimHubWPF.exe` 或 `SimHub.exe`。再透過 Windows 檔案總管把包內
 `simhub\FFBInterceptor.SimHub.dll` 與 `simhub\FFBInterceptor.Core.dll` 複製到這個精確的
@@ -114,7 +114,7 @@ SimHub 檔案。純手動路徑沒有 Manager protected state 或備份，不能
 3. 已匯入的 Dashboard 會保留，請在 SimHub 內手動移除。最後可直接刪除解壓資料夾；
    Manager 路徑從未寫入遊戲資料夾，所以遊戲端不需清理。
 
-## v0.3.0 削峰模型
+## v1.0.0 削峰模型
 
 ### 瞬時效果值
 
@@ -137,7 +137,7 @@ Condition、Custom 與未知效果因需要位置、速度、自訂樣本或裝�
 
 ### 同裝置保守絕對值和
 
-對每個 DirectInput 裝置，v0.3.0 先把所有正在輸出、可建模效果的**瞬時命令絕對值**
+對每個 DirectInput 裝置，v1.0.0 先把所有正在輸出、可建模效果的**瞬時命令絕對值**
 相加，再取所有裝置中最大的那一組：
 
 ```text
@@ -161,7 +161,7 @@ Dashboard gauge 使用截在 100% 的 `CombinedCommandPercent`，數字與峰值
 
 下列狀況會停止削峰結論，而不是猜測：
 
-| 狀況 | v0.3.0 行為 |
+| 狀況 | v1.0.0 行為 |
 |---|---|
 | producer 回報掉幀／同 session 重連 | 清除可能過期的播放狀態，標記資料缺口 |
 | 效果設定了 `TriggerButton` | protocol v1 看得到設定，卻看不到按鍵目前是否按下；標記 `TriggerStateUnavailable` |
@@ -203,7 +203,7 @@ producer session。容量超限時先重啟遊戲；若 `SourceStateDrops`／`St
 
 ## SimHub SDK 精確相容矩陣
 
-v0.3.0 的可發布建置目前只接受 `simhub/sdk-compatibility.json` 中 **SimHub 9.11.22**
+v1.0.0 的可發布建置目前只接受 `simhub/sdk-compatibility.json` 中 **SimHub 9.11.22**
 這一組 profile。`Test-SimHubSdk.ps1` 會逐一比對以下 SimHub 自有 DLL 的檔案長度與
 SHA-256：
 
@@ -216,12 +216,12 @@ SHA-256：
 版本目前是**未列入支援矩陣**，不是自動相容。這些 DLL 只在建置時引用，不會放進發布
 套件。
 
-建置需求：Windows、.NET Framework 4.8 Developer Pack、Visual Studio 2022 或更新版，
-以及符合上述指紋的本機 SimHub 安裝。
+建置需求：Windows、PowerShell 7、.NET Framework 4.8 Developer Pack、Visual Studio
+2022 或更新版，以及符合上述指紋的本機 SimHub 安裝。
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File simhub\tools\Build-SimHubPackage.ps1
-powershell -ExecutionPolicy Bypass -File simhub\tools\Build-LauncherPackage.ps1
+pwsh -NoProfile -File simhub\tools\Build-SimHubPackage.ps1
+pwsh -NoProfile -File simhub\tools\Build-LauncherPackage.ps1
 ```
 
 若 SimHub 不在預設路徑，傳入 `-SimHubInstallPath`。一般 CI 可建置 Core tests 並

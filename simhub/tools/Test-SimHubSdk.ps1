@@ -2,11 +2,14 @@
 [CmdletBinding()]
 param(
     [string]$SimHubInstallPath = 'C:\Program Files (x86)\SimHub',
-    [string]$FingerprintPath = (Join-Path $PSScriptRoot '..\sdk-compatibility.json')
+    [string]$FingerprintPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ([string]::IsNullOrWhiteSpace($FingerprintPath)) {
+    $FingerprintPath = Join-Path $PSScriptRoot '..\sdk-compatibility.json'
+}
 $sdkRoot = [IO.Path]::GetFullPath($SimHubInstallPath)
 $manifestPath = (Resolve-Path -LiteralPath $FingerprintPath -ErrorAction Stop).Path
 if (-not (Test-Path -LiteralPath $sdkRoot -PathType Container)) {

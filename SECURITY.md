@@ -1,4 +1,4 @@
-# v0.3 安全政策
+# v1 安全政策
 
 FFB Interceptor 是 DirectInput8 命令遙測工具，不是硬體安全控制、反作弊或扭力計。
 發現安全問題時，請使用 GitHub 的 Private Vulnerability Reporting，或在
@@ -8,8 +8,9 @@ FFB Interceptor 是 DirectInput8 命令遙測工具，不是硬體安全控制�
 
 | 版本 | 安全修正 |
 | --- | --- |
-| 最新受支援的 `v0.3.x` GitHub Release（依頁面標示 Stable／Experimental） | 支援 |
-| `v0.2.x` 與更舊版本 | 不支援；請升級並重新驗證套件 |
+| 最新 `v1.x` GitHub Release（依頁面標示 Stable／Experimental） | 發布後即成為主要支援版本 |
+| `v0.3.x` | 過渡支援到 2026-10-03；建議升級到已發布的最新 `v1.x` |
+| `v0.2.x` 與更早版本 | 不支援；請升級並重新驗證套件 |
 | 未標記 commit／自行修改套件 | 不提供 Release 完整性保證 |
 
 維護者會在 14 天內確認收到有效報告，並在公開細節前協調修正、緩解方式與揭露時間。
@@ -31,7 +32,7 @@ FFB Interceptor 是 DirectInput8 命令遙測工具，不是硬體安全控制�
 
 ### Launcher／Hook 模式
 
-首選的 `FFBInterceptor-Launcher-0.3.0.zip` 不含 `dinput8.dll`，也不會在遊戲目錄
+首選的 `FFBInterceptor-Launcher-1.0.0.zip` 不含 `dinput8.dll`，也不會在遊戲目錄
 放置或修改它。Manager／Launcher 只會為使用者明確選取的本機 x86／x64 EXE 建立新
 子程序，並載入套件內固定、同架構的 Hook；不接受既有 PID、任意 DLL、Windows 系統
 目錄目標或提升權限執行。Hook 只在新子程序內接上 `DirectInput8Create`，不修改磁碟上
@@ -131,8 +132,8 @@ WRITE／EXEC；憑證表、raw padding 或 overlay 內的假標記都會被拒�
 Authenticode 信任驗證。
 
 流程具備 Stable 能力不等於已有 Stable 信任根。本儲存庫目前不宣稱已配置公信
-Windows 程式碼簽章憑證、GitHub secrets、`[self-hosted, Windows, X64, simhub-sdk]`
-runner 或已發布 Stable 資產。使用者應在執行 Manager 前先由 Windows 檢查簽章；
+Windows 程式碼簽章憑證、GitHub signing secrets 或已發布 Stable 資產。使用者應在
+執行 Manager 前先由 Windows 檢查簽章；
 已被替換且先行執行的惡意 EXE 不能只靠「自我檢查」建立信任。
 
 ### Experimental：SHA-256 加外部 attestation
@@ -165,7 +166,7 @@ Release 必須等待 tag 所指 exact commit 的 CI／Security checks 成功，�
 
 ## 削峰可靠性不是安全訊號
 
-v0.3.0 的削峰只是同裝置多效果瞬時絕對值和之保守上界；跨裝置、跨來源不相加。它可能
+v1.0.0 的削峰只是同裝置多效果瞬時絕對值和之保守上界；跨裝置、跨來源不相加。它可能
 因向量抵消而高估，也不包含馬達控制器、電流、機構或實際扭力。
 
 TriggerButton 的即時按鍵狀態不在 Protocol v1；來源含按鍵觸發效果時，判定會標成
