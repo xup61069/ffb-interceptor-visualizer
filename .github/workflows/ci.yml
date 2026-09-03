@@ -113,6 +113,7 @@ jobs:
             'tests\powershell\manager_elevation_tests.ps1',
             'tests\powershell\manager_policy_tests.ps1',
             'tests\powershell\release_preflight_tests.ps1',
+            '.github\scripts\assert-mapped-runner-paths.ps1',
             '.github\scripts\package-release.ps1',
             '.github\scripts\import-signing-certificate.ps1',
             '.github\scripts\assert-release-assets-empty.ps1',

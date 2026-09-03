@@ -327,7 +327,8 @@ try {
         $manifestStream, [Text.UTF8Encoding]::new($false, $true), $false, 4096, $false)
     try { $manifestText = $manifestReader.ReadToEnd() }
     finally { $manifestReader.Dispose() }
-    if ($manifestText.StartsWith([char]0xFEFF) -or $manifestText -match '\r(?!\n)') {
+    if ($manifestText.StartsWith([string][char]0xFEFF, [StringComparison]::Ordinal) -or
+        $manifestText -match '\r(?!\n)') {
         throw "$PackageKind archive manifest is not canonical UTF-8 text."
     }
     $manifestBody = $manifestText.TrimEnd("`r", "`n")
