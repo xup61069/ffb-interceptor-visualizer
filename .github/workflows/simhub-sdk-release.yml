@@ -304,13 +304,23 @@ jobs:
         env:
           SIMHUB_INSTALL_PATH: ${{ steps.validated-payload.outputs.simhub_install_path }}
         run: simhub/tools/Test-SimHubSdk.ps1 -SimHubInstallPath $env:SIMHUB_INSTALL_PATH
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.13'
       - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
         with:
           version: '0.12.5'
+          python-version: '3.13'
           enable-cache: false
+      - name: Install isolated uv-managed Python
+        shell: pwsh
+        run: |
+          $pythonRoot = [IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP 'uv-python'))
+          [IO.Directory]::CreateDirectory($pythonRoot) | Out-Null
+          $env:UV_PYTHON_INSTALL_DIR = $pythonRoot
+          "UV_PYTHON_INSTALL_DIR=$pythonRoot" |
+            Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+          uv python install 3.13
+          if ($LASTEXITCODE -ne 0) { throw 'uv-managed Python 3.13 installation failed.' }
+          uv python find 3.13
+          if ($LASTEXITCODE -ne 0) { throw 'uv-managed Python 3.13 was not found after installation.' }
       - name: Configure unsigned Full experimental channel
         if: ${{ github.event.client_payload.channel == 'experimental' }}
         shell: pwsh

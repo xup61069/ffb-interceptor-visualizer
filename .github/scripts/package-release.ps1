@@ -171,7 +171,8 @@ uv run python ../.github/scripts/generate-spdx-sbom.py --pyproject pyproject.tom
 if ($LASTEXITCODE -ne 0) { throw 'Python SPDX SBOM generation failed.' }
 Compress-Archive -Path dist/ffb-viewer -DestinationPath ../release/ffb-viewer-x64.zip -Force
 Pop-Location
-python .github/scripts/generate-component-sbom.py --cyclonedx release/sbom.cdx.json --spdx release/sbom.spdx.json
+uv run --project viewer python .github/scripts/generate-component-sbom.py `
+    --cyclonedx release/sbom.cdx.json --spdx release/sbom.spdx.json
 if ($LASTEXITCODE -ne 0) { throw 'Repository component SBOM generation failed.' }
 Assert-ZipEntries -Archive 'release/ffb-viewer-x64.zip' -RequiredEntries @(
     'ffb-viewer/ffb-viewer.exe',

@@ -44,8 +44,10 @@ try {
         -Destination (Join-Path $defaultLayout 'sdk-compatibility.json')
     $legacyOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $defaultScript `
         -SimHubInstallPath $sdk 2>&1
-    if ($LASTEXITCODE -ne 0 -or (@($legacyOutput) -join "`n").Trim() -ne 'test-profile') {
-        throw 'default SDK fingerprint path did not work under Windows PowerShell'
+    $legacyText = (@($legacyOutput) -join "`n").Trim()
+    if ($LASTEXITCODE -ne 0 -or
+        $legacyText -notmatch '(?m)^\uFEFF?test-profile\r?$') {
+        throw "default SDK fingerprint path did not work under Windows PowerShell: $legacyText"
     }
 
     $previousErrorPreference = $ErrorActionPreference

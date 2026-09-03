@@ -166,6 +166,13 @@ dependency graph，以及 SimHub SDK build-time-only exact fingerprint 產生；
 
 工作流程：`.github/workflows/simhub-sdk-release.yml`（顯示名稱 `Full SimHub release`）
 
+正式建立不可移動的 tag 前，先以 `.github/workflows/simhub-runner-preflight.yml` 對同一組
+runner labels 跑一次不含 secrets、只有 `contents: read` 的完整本機建置／封裝預檢。
+payload 只接受預期的 master 40 位 commit SHA 與隔離 SimHub SDK 路徑；預檢會驗證
+master 綁定、SDK 指紋、uv-managed Python、x86／x64 全部測試，以及 SimHub／Launcher
+套件，但不建立 tag、attestation 或 Release。預檢 runner 完成一個 job 後必須退役；
+正式發布另用全新 profile 與全新 `--ephemeral` runner，不能重用預檢工作目錄。
+
 只接受 `repository_dispatch` 事件 `ffb-full-release`。payload 必須剛好包含：
 
 - `tag`：既有且位於 master 的 canonical `vX.Y.Z` tag；
@@ -215,7 +222,9 @@ runs-on: [self-hosted, Windows, X64, simhub-sdk, ephemeral]
    在有效期內，且 leaf certificate DER 的 SHA-256 完全符合釘選值。PFX 內每張憑證的
    thumbprint 都會被追蹤；若 `CurrentUser\My` 已存在其中任一張就停止，避免沿用前次
    中斷的身分。`experimental` channel 固定未簽章，完全不引用這三個 secrets。
-6. 以 Visual Studio 2022 Build Tools 對 x64、x86 各自執行
+6. 以鎖版 `setup-uv` 將 uv-managed Python 3.13 安裝到 runner 暫存區，不使用 Windows
+   self-hosted 首次安裝時需要管理員權限的 `setup-python`；再以 Visual Studio 2022
+   Build Tools 對 x64、x86 各自執行
    `cmake --build ... --target all`
    與完整 CTest。Stable 加入 `FFB_STABLE_PACKAGE=ON` 與
    `FFB_EXPECTED_SIGNER_SHA256=<64 hex>`；Experimental 則為 OFF。

@@ -92,6 +92,8 @@ if (-not $invalidPfxFailed) { throw 'invalid signing PFX was not rejected' }
 
 $baseWorkflow = Get-Content -Raw -LiteralPath (Join-Path $root '.github\workflows\release.yml')
 $fullWorkflow = Get-Content -Raw -LiteralPath (Join-Path $root '.github\workflows\simhub-sdk-release.yml')
+$runnerPreflightWorkflow = Get-Content -Raw -LiteralPath (
+    Join-Path $root '.github\workflows\simhub-runner-preflight.yml')
 $packageRelease = Get-Content -Raw -LiteralPath (Join-Path $root '.github\scripts\package-release.ps1')
 if ($baseWorkflow -notmatch 'types:\s*\[ffb-experimental-base-release\]' -or
     $fullWorkflow -notmatch 'types:\s*\[ffb-full-release\]' -or
@@ -227,6 +229,10 @@ foreach ($requiredFullOperationFragment in @(
     'run-name: Full release ${{ github.event.client_payload.tag }} (${{ github.event.client_payload.channel }})',
     'timeout-minutes: 120',
     'id: build-toolchain',
+    "python-version: '3.13'",
+    '- name: Install isolated uv-managed Python',
+    'UV_PYTHON_INSTALL_DIR',
+    'uv python install 3.13',
     '-products Microsoft.VisualStudio.Product.BuildTools',
     '-version ''[17.0,18.0)''',
     '"visual_studio_install_path=$vsroot"',
@@ -238,6 +244,35 @@ foreach ($requiredFullOperationFragment in @(
         throw "Full release workflow is missing bounded runner/toolchain contract fragment: $requiredFullOperationFragment"
     }
 }
+if ($fullWorkflow -match 'actions/setup-python@') {
+    throw 'Full release workflow must not require administrator-only setup-python on its isolated self-hosted runner'
+}
+foreach ($requiredRunnerPreflightFragment in @(
+    'types: [ffb-full-runner-preflight]',
+    'run-name: Full runner preflight ${{ github.event.client_payload.commit }}',
+    'timeout-minutes: 120',
+    'runs-on: [self-hosted, Windows, X64, simhub-sdk, ephemeral]',
+    'permissions:',
+    'contents: read',
+    'ref: refs/heads/master',
+    'persist-credentials: false',
+    'Runner preflight client_payload must contain exactly: commit, simhub_path.',
+    '$head -cne $commit -or $master -cne $commit',
+    "python-version: '3.13'",
+    '-products Microsoft.VisualStudio.Product.BuildTools',
+    '-version ''[17.0,18.0)''',
+    '.github/scripts/package-release.ps1',
+    'simhub/tools/Test-SimHubPackage.ps1',
+    'simhub/tools/Test-LauncherPackage.ps1'
+)) {
+    if ($runnerPreflightWorkflow.IndexOf($requiredRunnerPreflightFragment,
+            [StringComparison]::Ordinal) -lt 0) {
+        throw "Runner preflight workflow is missing fail-closed fragment: $requiredRunnerPreflightFragment"
+    }
+}
+if ($runnerPreflightWorkflow -match 'environment:\s+stable-signing|contents:\s+write|secrets\.') {
+    throw 'Runner preflight workflow must not receive the release environment, write permission, or secrets'
+}
 foreach ($requiredPackageToolchainFragment in @(
     '[string]$VisualStudioInstallPath = ''''',
     '-products *',
@@ -248,6 +283,11 @@ foreach ($requiredPackageToolchainFragment in @(
             [StringComparison]::Ordinal) -lt 0) {
         throw "Base/Full package script is missing its Visual Studio 2022 selection contract: $requiredPackageToolchainFragment"
     }
+}
+if ($packageRelease.IndexOf(
+        'uv run --project viewer python .github/scripts/generate-component-sbom.py',
+        [StringComparison]::Ordinal) -lt 0) {
+    throw 'Release component SBOM must use the locked uv-managed Python environment'
 }
 $stableStepMatch = [regex]::Match($fullWorkflow,
     '(?ms)^\s*- name: Load Stable release signing identity and policy\s*$.*?(?=^\s*- name:)')
