@@ -287,7 +287,10 @@ jobs:
         shell: pwsh
         env:
           RELEASE_TAG: ${{ github.event.client_payload.tag }}
-        run: .github/scripts/package-release.ps1
+          FFB_RELEASE_COMMIT: ${{ steps.bind-release.outputs.commit_sha }}
+        run: |
+          .github/scripts/package-release.ps1 `
+            -ExpectedCommitSha $env:FFB_RELEASE_COMMIT
       - name: Attest build provenance
         uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
         with:

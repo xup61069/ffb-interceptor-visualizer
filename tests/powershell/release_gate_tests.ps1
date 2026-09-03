@@ -95,6 +95,35 @@ $fullWorkflow = Get-Content -Raw -LiteralPath (Join-Path $root '.github\workflow
 $runnerPreflightWorkflow = Get-Content -Raw -LiteralPath (
     Join-Path $root '.github\workflows\simhub-runner-preflight.yml')
 $packageRelease = Get-Content -Raw -LiteralPath (Join-Path $root '.github\scripts\package-release.ps1')
+$launcherArchiveVerifierPath = Join-Path $root '.github\scripts\verify-release-package-archive.ps1'
+$launcherArchiveVerifier = Get-Content -Raw -LiteralPath $launcherArchiveVerifierPath
+$releasePublisher = Get-Content -Raw -LiteralPath (
+    Join-Path $root '.github\scripts\publish-release-assets.ps1')
+function Assert-WorkflowPowerShellParses([string]$Path) {
+    $lines = [IO.File]::ReadAllLines($Path)
+    for ($index = 0; $index -lt $lines.Count; ++$index) {
+        if ($lines[$index] -cne '        run: |') { continue }
+        $end = $index + 1
+        while ($end -lt $lines.Count -and
+               ($lines[$end].StartsWith('          ') -or
+                [string]::IsNullOrWhiteSpace($lines[$end]))) {
+            ++$end
+        }
+        $body = ($lines[($index + 1)..($end - 1)] | ForEach-Object {
+            if ($_.Length -ge 10) { $_.Substring(10) } else { '' }
+        }) -join "`n"
+        $tokens = $null
+        $errors = $null
+        [void][Management.Automation.Language.Parser]::ParseInput(
+            $body, [ref]$tokens, [ref]$errors)
+        if ($errors.Count) {
+            throw "PowerShell parse error in $Path near workflow line $($index + 2): $($errors[0].Message)"
+        }
+    }
+}
+Assert-WorkflowPowerShellParses (Join-Path $root '.github\workflows\simhub-sdk-release.yml')
+Assert-WorkflowPowerShellParses (Join-Path $root '.github\workflows\simhub-runner-preflight.yml')
+Assert-WorkflowPowerShellParses (Join-Path $root '.github\workflows\release.yml')
 if ($baseWorkflow -notmatch 'types:\s*\[ffb-experimental-base-release\]' -or
     $fullWorkflow -notmatch 'types:\s*\[ffb-full-release\]' -or
     $baseWorkflow -match 'workflow_dispatch' -or $fullWorkflow -match 'workflow_dispatch') {
@@ -102,7 +131,6 @@ if ($baseWorkflow -notmatch 'types:\s*\[ffb-experimental-base-release\]' -or
 }
 foreach ($workflowSource in @($baseWorkflow, $fullWorkflow)) {
     if ($workflowSource -notmatch "github\.event_name == 'repository_dispatch'\s+&&\s+github\.ref == 'refs/heads/master'" -or
-        $workflowSource -notmatch 'ref:\s+refs/heads/master' -or
         $workflowSource -notmatch 'github\.event\.client_payload\.tag' -or
         $workflowSource -notmatch 'FFB_CLIENT_PAYLOAD_JSON' -or
         $workflowSource -notmatch 'ConvertFrom-Json\s+-ErrorAction\s+Stop') {
@@ -136,8 +164,6 @@ foreach ($workflowSource in @($baseWorkflow, $fullWorkflow)) {
         'FFB_TRUSTED_RELEASE_API_SHA256: ${{ steps.trusted-controls.outputs.release_api_sha256 }}',
         'FFB_TRUSTED_RELEASE_PREFLIGHT: ${{ steps.trusted-controls.outputs.release_preflight }}',
         'FFB_TRUSTED_RELEASE_PREFLIGHT_SHA256: ${{ steps.trusted-controls.outputs.release_preflight_sha256 }}',
-        'FFB_TRUSTED_PUBLISHER: ${{ steps.trusted-controls.outputs.publisher }}',
-        'FFB_TRUSTED_PUBLISHER_SHA256: ${{ steps.trusted-controls.outputs.publisher_sha256 }}',
         'FFB_TRUSTED_VERIFY_RELEASE_REF: ${{ steps.trusted-controls.outputs.verify_release_ref }}',
         'FFB_TRUSTED_VERIFY_RELEASE_REF_SHA256: ${{ steps.trusted-controls.outputs.verify_release_ref_sha256 }}',
         'FFB_TRUSTED_WAIT_REQUIRED_CHECKS_SHA256: ${{ steps.trusted-controls.outputs.wait_required_checks_sha256 }}',
@@ -147,9 +173,6 @@ foreach ($workflowSource in @($baseWorkflow, $fullWorkflow)) {
         'ref: ${{ steps.bind-release.outputs.commit_sha }}',
         'Get-FFBUniqueReleaseByTag',
         'Assert-FFBMutableReleaseDraft',
-        'git merge-base --is-ancestor',
-        'elseif ($tagCommit -cne $masterCommit)',
-        '$verifyArguments.RequireMasterHead = $true',
         '& $env:FFB_TRUSTED_VERIFY_RELEASE_REF @verifyArguments',
         '$publisherArguments.ExpectedReleaseId = [long]$env:FFB_EXPECTED_RELEASE_ID'
     )) {
@@ -159,17 +182,15 @@ foreach ($workflowSource in @($baseWorkflow, $fullWorkflow)) {
     }
 
     if ([regex]::Matches($workflowSource,
-            '\$verifyArguments\.RequireMasterHead\s*=\s*\$true').Count -lt 2 -or
+            'RequireMasterHead\s*=\s*\$true').Count -lt 1 -or
         [regex]::Matches($workflowSource,
             '(?m)Get-FFBUniqueReleaseByTag[^\r\n]*(?:\r?\n[^\r\n]*){0,2}-ExpectedId').Count -lt 1 -or
         [regex]::Matches($workflowSource,
             'Assert-FFBMutableReleaseDraft').Count -lt 2 -or
         [regex]::Matches($workflowSource,
-            '&\s+\$env:FFB_TRUSTED_VERIFY_RELEASE_REF\s+@verifyArguments').Count -lt 2 -or
+            '&\s+\$env:FFB_TRUSTED_VERIFY_RELEASE_REF\s+@verifyArguments').Count -lt 1 -or
         $workflowSource -notmatch '(?ms)"release_state=\$state",\s*"release_id=\$releaseId"\s*\)\s*\|\s*Out-File[^\r\n]+\$env:GITHUB_OUTPUT' -or
         $workflowSource -notmatch '(?m)"commit_sha=\$tagCommit"\s*\|\s*Out-File[^\r\n]+\$env:GITHUB_OUTPUT' -or
-        [regex]::Matches($workflowSource,
-            'if\s*\(\$env:FFB_RELEASE_STATE\s+-ne\s+''draft-recovery''\)').Count -lt 2 -or
         $workflowSource -notmatch 'elseif\s*\(\$env:FFB_RELEASE_STATE\s+-eq\s+''published''\)' -or
         $workflowSource -notmatch 'already has a published release' -or
         [regex]::Matches($workflowSource,
@@ -202,6 +223,38 @@ foreach ($workflowSource in @($baseWorkflow, $fullWorkflow)) {
         throw 'post-checkout release revalidation is not bound to the original state and numeric ID'
     }
 }
+foreach ($baseAncestorRecoveryFragment in @(
+    'git merge-base --is-ancestor',
+    'elseif ($tagCommit -cne $masterCommit)',
+    '$verifyArguments.RequireMasterHead = $true',
+    'if ($env:FFB_RELEASE_STATE -ne ''draft-recovery'')'
+)) {
+    if ($baseWorkflow.IndexOf($baseAncestorRecoveryFragment,
+            [StringComparison]::Ordinal) -lt 0) {
+        throw "Base release lost its bounded ancestor draft recovery contract: $baseAncestorRecoveryFragment"
+    }
+}
+if ($baseWorkflow -notmatch 'ref:\s+refs/heads/master' -or
+    $fullWorkflow.IndexOf('ref: ${{ github.sha }}', [StringComparison]::Ordinal) -lt 0) {
+    throw 'Release workflows do not checkout their required protected trust roots'
+}
+if ($baseWorkflow.IndexOf(
+        '-ExpectedCommitSha $env:FFB_RELEASE_COMMIT',
+        [StringComparison]::Ordinal) -lt 0) {
+    throw 'Base release package source is not bound to the verified tag commit'
+}
+if ($baseWorkflow.IndexOf(
+        'FFB_TRUSTED_PUBLISHER: ${{ steps.trusted-controls.outputs.publisher }}',
+        [StringComparison]::Ordinal) -lt 0 -or
+    $fullWorkflow.IndexOf('id: publish-controls', [StringComparison]::Ordinal) -lt 0 -or
+    $fullWorkflow.IndexOf(
+        'FFB_TRUSTED_PUBLISHER: ${{ steps.publish-controls.outputs.publisher }}',
+        [StringComparison]::Ordinal) -lt 0 -or
+    $fullWorkflow.IndexOf(
+        'FFB_TRUSTED_PUBLISHER_SHA256: ${{ steps.publish-controls.outputs.publisher_sha256 }}',
+        [StringComparison]::Ordinal) -lt 0) {
+    throw 'release workflows do not bind their publisher to the appropriate isolated control snapshot'
+}
 if ($fullWorkflow -notmatch 'github\.event\.client_payload\.channel' -or
     $fullWorkflow -notmatch 'id:\s+validated-payload' -or
     $fullWorkflow -notmatch '"simhub_install_path=\$normalisedSimHubPath"' -or
@@ -210,20 +263,19 @@ if ($fullWorkflow -notmatch 'github\.event\.client_payload\.channel' -or
     $fullWorkflow.IndexOf(
         'SIMHUB_INSTALL_PATH: ${{ github.event.client_payload.simhub_path }}',
         [StringComparison]::Ordinal) -ge 0 -or
-    $fullWorkflow -notmatch '\$channel\s+-cnotin\s+@\(''experimental'',\s*''stable''\)' -or
+    $fullWorkflow -notmatch '\$channel\s+-cne\s+''experimental''' -or
     $fullWorkflow -notmatch '\$names\.Count\s+-ne\s+\$expectedNames\.Count' -or
     $fullWorkflow -notmatch 'Compare-Object[^\r\n]+-CaseSensitive') {
-    throw 'Full release workflow does not fail closed on its complete client payload contract'
+    throw 'Full release workflow does not fail closed on its experimental-only client payload contract'
 }
-if ($fullWorkflow -notmatch 'if\s*\(\$env:RELEASE_CHANNEL\s+-eq\s+''stable''\)' -or
-    $fullWorkflow -notmatch 'Stable channel cannot resume an existing draft' -or
-    [regex]::Matches($fullWorkflow, 'function\s+Restore-FFBTrustedSigner').Count -lt 2 -or
-    [regex]::Matches($fullWorkflow, 'if\s*\(\$stable\)\s*\{\s*Restore-FFBTrustedSigner\s*\}').Count -lt 4) {
-    throw 'Full release workflow permits Stable ancestor-draft recovery or does not rebind its trusted signer'
+if ($fullWorkflow -match '\$\{\{\s*secrets\.' -or
+    $fullWorkflow -notmatch 'Full release currently accepts only the unsigned experimental channel' -or
+    $fullWorkflow -match 'Restore-FFBTrustedSigner|RequireSigning:\$stable') {
+    throw 'Full experimental workflow must not expose or attempt to use Stable signing identity'
 }
-if ($fullWorkflow -notmatch 'environment:\s+stable-signing' -or
+if ($fullWorkflow -notmatch '(?ms)^  publish:.*?environment:\s+stable-signing' -or
     $fullWorkflow -notmatch 'runs-on:\s*\[[^\]]*ephemeral[^\]]*\]') {
-    throw 'Full release workflow is missing its protected environment or ephemeral runner contract'
+    throw 'Full release workflow is missing its hosted approval or ephemeral build-runner contract'
 }
 foreach ($requiredFullOperationFragment in @(
     'run-name: Full release ${{ github.event.client_payload.tag }} (${{ github.event.client_payload.channel }})',
@@ -236,11 +288,25 @@ foreach ($requiredFullOperationFragment in @(
     'UV_PYTHON_INSTALL_DIR',
     'uv python install 3.13.15',
     'uv python find 3.13.15 --managed-python',
-    '-products Microsoft.VisualStudio.Product.BuildTools',
-    '-version ''[17.0,18.0)''',
+    '- name: Validate host-pinned Visual Studio toolchains',
+    'Resolve-HostToolchain',
+    'FFB_TOOLCHAIN_X64_CMD',
+    'FFB_TOOLCHAIN_X64_SHA256',
+    'FFB_TOOLCHAIN_X86_CMD',
+    'FFB_TOOLCHAIN_X86_SHA256',
+    'host toolchain snapshot is writable by the release job',
+    'host toolchain directory is writable by the release job',
+    'host toolchain snapshot contains an unsafe or duplicate command',
+    'host toolchain snapshot has the wrong architecture',
+    'x64 and x86 host toolchains must be distinct snapshots in one runtime',
+    'The SimHub SDK snapshot is not bound to the toolchain runtime',
+    'Runner temp/workspace is outside the toolchain disposable runtime',
+    'runtime_root=$runtimeX64',
     '"visual_studio_install_path=$vsroot"',
     'FFB_VISUAL_STUDIO_INSTALL_PATH: ${{ steps.build-toolchain.outputs.visual_studio_install_path }}',
-    '-VisualStudioInstallPath $env:FFB_VISUAL_STUDIO_INSTALL_PATH'
+    '-ToolchainX64Path $env:FFB_TOOLCHAIN_X64_CMD',
+    '-ToolchainX86Path $env:FFB_TOOLCHAIN_X86_CMD',
+    '-ExpectedCommitSha $env:FFB_RELEASE_COMMIT'
 )) {
     if ($fullWorkflow.IndexOf($requiredFullOperationFragment,
             [StringComparison]::Ordinal) -lt 0) {
@@ -250,14 +316,39 @@ foreach ($requiredFullOperationFragment in @(
 if ($fullWorkflow -match 'actions/setup-python@') {
     throw 'Full release workflow must not require administrator-only setup-python on its isolated self-hosted runner'
 }
+if ($fullWorkflow -match 'vswhere|VsDevCmd') {
+    throw 'Full release workflow must use host-pinned snapshots instead of AppContainer-invisible VS discovery'
+}
+$toolchainValidationStart = $fullWorkflow.IndexOf(
+    '- name: Validate host-pinned Visual Studio toolchains', [StringComparison]::Ordinal)
+$channelBuildStart = $fullWorkflow.IndexOf(
+    '- name: Build channel-policy launcher, hook, manager, and tests', [StringComparison]::Ordinal)
+$packageBuildStart = $fullWorkflow.IndexOf(
+    '- name: Build base, SimHub, and no-game-DLL launcher packages', [StringComparison]::Ordinal)
+if ($toolchainValidationStart -lt 0 -or $channelBuildStart -le $toolchainValidationStart -or
+    $packageBuildStart -le $channelBuildStart) {
+    throw 'Full release workflow must separate trusted toolchain outputs from repository-controlled builds'
+}
+$toolchainValidationStep = $fullWorkflow.Substring(
+    $toolchainValidationStart, $channelBuildStart - $toolchainValidationStart)
+$channelBuildStep = $fullWorkflow.Substring(
+    $channelBuildStart, $packageBuildStart - $channelBuildStart)
+if ($toolchainValidationStep -match '(?im)^\s*(?:cmake|ctest)\b|package-release\.ps1' -or
+    $channelBuildStep -match 'GITHUB_OUTPUT') {
+    throw 'Repository-controlled build execution must not inherit the trusted toolchain output file'
+}
 foreach ($requiredRunnerPreflightFragment in @(
     'types: [ffb-full-runner-preflight]',
     'run-name: Full runner preflight ${{ github.event.client_payload.commit }}',
+    'ref: ${{ github.sha }}',
+    'FFB_WORKFLOW_COMMIT: ${{ github.sha }}',
+    '$workflowCommit -cne $commit',
+    '$head -cne $commit',
+    '$master -cne $commit',
     'timeout-minutes: 120',
     'runs-on: [self-hosted, Windows, X64, simhub-sdk, ephemeral, ffb-preflight]',
     'permissions:',
     'contents: read',
-    'ref: refs/heads/master',
     'persist-credentials: false',
     'Runner preflight client_payload must contain exactly: commit, simhub_path.',
     '$head -cne $commit -or $master -cne $commit',
@@ -265,9 +356,21 @@ foreach ($requiredRunnerPreflightFragment in @(
     'cache-local-path: ''${{ runner.temp }}\uv-cache''',
     'uv python install 3.13.15',
     'uv python find 3.13.15 --managed-python',
-    '-products Microsoft.VisualStudio.Product.BuildTools',
-    '-version ''[17.0,18.0)''',
+    'Resolve-HostToolchain',
+    'FFB_TOOLCHAIN_X64_CMD',
+    'FFB_TOOLCHAIN_X64_SHA256',
+    'FFB_TOOLCHAIN_X86_CMD',
+    'FFB_TOOLCHAIN_X86_SHA256',
+    'host toolchain snapshot is writable by the release job',
+    'host toolchain directory is writable by the release job',
+    'host toolchain snapshot contains an unsafe or duplicate command',
+    'host toolchain snapshot has the wrong architecture',
+    'x64 and x86 host toolchains must be distinct snapshots in one runtime',
+    'The SimHub SDK snapshot is not bound to the toolchain runtime',
+    'Runner temp/workspace is outside the toolchain disposable runtime',
+    'runtime_root=$runtimeX64',
     '.github/scripts/package-release.ps1',
+    '-ExpectedCommitSha $env:FFB_EXPECTED_COMMIT',
     'simhub/tools/Test-SimHubPackage.ps1',
     'simhub/tools/Test-LauncherPackage.ps1'
 )) {
@@ -279,8 +382,40 @@ foreach ($requiredRunnerPreflightFragment in @(
 if ($runnerPreflightWorkflow -match 'environment:\s+stable-signing|contents:\s+write|secrets\.') {
     throw 'Runner preflight workflow must not receive the release environment, write permission, or secrets'
 }
+if ($runnerPreflightWorkflow -match 'vswhere|VsDevCmd') {
+    throw 'Runner preflight must use host-pinned snapshots instead of AppContainer-invisible VS discovery'
+}
 foreach ($requiredPackageToolchainFragment in @(
     '[string]$VisualStudioInstallPath = ''''',
+    '[string]$ToolchainX64Path = ''''',
+    '[string]$ToolchainX64Sha256 = ''''',
+    '[string]$ToolchainX86Path = ''''',
+    '[string]$ToolchainX86Sha256 = ''''',
+    'Resolve-ToolchainSnapshot',
+    'Both x64 and x86 toolchain snapshot paths and SHA-256 pins are required together.',
+    'toolchain snapshot path must not contain a reparse point.',
+    'toolchain snapshot is outside its bound disposable runtime path.',
+    'toolchain snapshot contains an unsafe or duplicate command.',
+    'toolchain snapshot does not bind the expected host/target architecture.',
+    'toolchain snapshot directory is writable by the release job.',
+    'x64 and x86 toolchain snapshots must be distinct files in one disposable runtime.',
+    'The SimHub SDK snapshot is not bound to the toolchain disposable runtime.',
+    'RUNNER_TEMP is outside the toolchain disposable runtime.',
+    'Bound disposable runtime path contains a reparse point:',
+    '[string]$ReleaseTag = $env:RELEASE_TAG',
+    '[string]$ExpectedCommitSha = ''''',
+    'ReleaseTag must be local or a canonical vX.Y.Z tag.',
+    'Package source HEAD does not match the expected release commit.',
+    'Release tag does not resolve to the package source commit.',
+    'Package source HEAD changed while building release assets.',
+    'Release tag changed while building release assets.',
+    'git archive --format=zip "--output=$sourceArchivePath" $sourceCommit',
+    'Git release bindings changed while creating the source archive.',
+    'Invoke-CheckedNativeCommand',
+    'Packaged viewer build failed',
+    'Source archive output escaped the release directory.',
+    'Source archive creation failed for commit',
+    'Source archive output is not a nonempty regular file.',
     '-products *',
     '-version ''[17.0,18.0)''',
     'Resolve-Path -LiteralPath $VisualStudioInstallPath -ErrorAction Stop'
@@ -290,26 +425,613 @@ foreach ($requiredPackageToolchainFragment in @(
         throw "Base/Full package script is missing its Visual Studio 2022 selection contract: $requiredPackageToolchainFragment"
     }
 }
+try {
+    & (Join-Path $root '.github\scripts\package-release.ps1') -ReleaseTag '..\escape'
+    throw 'Package script accepted an unsafe ReleaseTag.'
+}
+catch {
+    if ($_.Exception.Message -notmatch 'ReleaseTag must be local or a canonical') { throw }
+}
+try {
+    & (Join-Path $root '.github\scripts\package-release.ps1') `
+        -ReleaseTag local -ExpectedCommitSha ('0' * 40)
+    throw 'Package script accepted a mismatched expected commit.'
+}
+catch {
+    if ($_.Exception.Message -notmatch 'Package source HEAD does not match the expected release commit') { throw }
+}
+
+# Execute the package script's snapshot resolver in isolation so malformed host
+# snapshots fail before any compiler or build command can run.
+$packageTokens = $null
+$packageErrors = $null
+$packageAst = [Management.Automation.Language.Parser]::ParseFile(
+    (Join-Path $root '.github\scripts\package-release.ps1'),
+    [ref]$packageTokens, [ref]$packageErrors)
+if ($packageErrors.Count) { throw $packageErrors[0] }
+$snapshotFunctions = @($packageAst.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -ceq 'Resolve-ToolchainSnapshot'
+}, $true))
+if ($snapshotFunctions.Count -ne 1) {
+    throw 'Could not isolate exactly one Resolve-ToolchainSnapshot implementation.'
+}
+. ([scriptblock]::Create($snapshotFunctions[0].Extent.Text))
+
+$nativeCheckFunctions = @($packageAst.FindAll({
+    param($node)
+    $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -ceq 'Invoke-CheckedNativeCommand'
+}, $true))
+if ($nativeCheckFunctions.Count -ne 1) {
+    throw 'Could not isolate exactly one Invoke-CheckedNativeCommand implementation.'
+}
+. ([scriptblock]::Create($nativeCheckFunctions[0].Extent.Text))
+Invoke-CheckedNativeCommand -FailureMessage 'native fixture failed' -Command {
+    cmd.exe /d /c exit 0
+}
+try {
+    Invoke-CheckedNativeCommand -FailureMessage 'native fixture failed' -Command {
+        cmd.exe /d /c exit 23
+    }
+    throw 'Checked native-command helper accepted a nonzero exit code.'
+}
+catch {
+    if ($_.Exception.Message -notmatch 'native fixture failed \(exit 23\)') { throw }
+}
+$snapshotFixtureRoot = 'C:\ffb-v1-' + [Guid]::NewGuid().ToString('N')
+if ($snapshotFixtureRoot -cnotmatch '^C:\\ffb-v1-[0-9a-f]{32}\z' -or
+    (Test-Path -LiteralPath $snapshotFixtureRoot)) {
+    throw 'Unsafe toolchain snapshot fixture root.'
+}
+$snapshotToolchainDirectory = Join-Path $snapshotFixtureRoot 'Toolchain'
+$snapshotPath = Join-Path $snapshotToolchainDirectory 'x64.cmd'
+$validSnapshotLines = @(
+    '@echo off',
+    'set "PATH=C:\BuildTools\bin"',
+    'set "INCLUDE=C:\BuildTools\include"',
+    'set "LIB=C:\BuildTools\lib"',
+    'set "LIBPATH=C:\BuildTools\libpath"',
+    'set "VCINSTALLDIR=C:\BuildTools\VC\"',
+    'set "VCToolsInstallDir=C:\BuildTools\VC\Tools\"',
+    'set "VSINSTALLDIR=C:\BuildTools\"',
+    'set "WindowsSdkDir=C:\WindowsKits\"',
+    'set "VSCMD_ARG_HOST_ARCH=x64"',
+    'set "VSCMD_ARG_TGT_ARCH=x64"'
+)
+try {
+    [IO.Directory]::CreateDirectory($snapshotToolchainDirectory) | Out-Null
+    function Assert-ToolchainSnapshotRejected(
+        [string[]]$Lines, [string]$Pattern, [string]$HashOverride = '') {
+        if (Test-Path -LiteralPath $snapshotPath) {
+            [IO.File]::SetAttributes($snapshotPath, [IO.FileAttributes]::Normal)
+        }
+        [IO.File]::WriteAllLines($snapshotPath, $Lines, [Text.UTF8Encoding]::new($false))
+        $hash = if ($HashOverride) { $HashOverride } else {
+            (Get-FileHash -LiteralPath $snapshotPath -Algorithm SHA256).Hash
+        }
+        try {
+            Resolve-ToolchainSnapshot -Path $snapshotPath -Sha256 $hash -Architecture x64 | Out-Null
+        }
+        catch {
+            if ($_.Exception.Message -notmatch $Pattern) { throw }
+            return
+        }
+        throw "Toolchain snapshot resolver accepted a rejected fixture: $Pattern"
+    }
+    Assert-ToolchainSnapshotRejected `
+        -Lines @($validSnapshotLines | Where-Object { $_ -notmatch '^set "LIBPATH=' }) `
+        -Pattern 'missing LIBPATH'
+    Assert-ToolchainSnapshotRejected `
+        -Lines @($validSnapshotLines + 'set "PATH=C:\duplicate"') `
+        -Pattern 'unsafe or duplicate command'
+    Assert-ToolchainSnapshotRejected `
+        -Lines @($validSnapshotLines -replace 'set "PATH=.*', 'set "PATH=C:\Tools&whoami"') `
+        -Pattern 'unsafe or duplicate command'
+    Assert-ToolchainSnapshotRejected `
+        -Lines @($validSnapshotLines -replace 'VSCMD_ARG_TGT_ARCH=x64', 'VSCMD_ARG_TGT_ARCH=x86') `
+        -Pattern 'expected host/target architecture'
+    Assert-ToolchainSnapshotRejected -Lines $validSnapshotLines `
+        -Pattern 'failed SHA-256 verification' -HashOverride ('0' * 64)
+    Assert-ToolchainSnapshotRejected -Lines $validSnapshotLines `
+        -Pattern 'writable by the release job'
+    [IO.File]::SetAttributes($snapshotPath, [IO.FileAttributes]::ReadOnly)
+    $readonlyHash = (Get-FileHash -LiteralPath $snapshotPath -Algorithm SHA256).Hash
+    try {
+        Resolve-ToolchainSnapshot -Path $snapshotPath -Sha256 $readonlyHash `
+            -Architecture x64 | Out-Null
+        throw 'Toolchain snapshot resolver accepted a DOS read-only substitute for ACL isolation.'
+    }
+    catch {
+        if ($_.Exception.Message -notmatch 'ACL isolation, not a DOS read-only attribute') { throw }
+    }
+    finally { [IO.File]::SetAttributes($snapshotPath, [IO.FileAttributes]::Normal) }
+}
+finally {
+    if (Test-Path -LiteralPath $snapshotFixtureRoot) {
+        $resolvedSnapshotFixture = (Resolve-Path -LiteralPath $snapshotFixtureRoot).Path
+        if ($resolvedSnapshotFixture -cnotmatch '^C:\\ffb-v1-[0-9a-f]{32}\z') {
+            throw 'Refusing unsafe toolchain snapshot fixture cleanup.'
+        }
+        Remove-Item -LiteralPath $resolvedSnapshotFixture -Recurse -Force
+    }
+}
 if ($packageRelease.IndexOf(
         'uv run --project viewer python .github/scripts/generate-component-sbom.py',
         [StringComparison]::Ordinal) -lt 0) {
     throw 'Release component SBOM must use the locked uv-managed Python environment'
 }
-$stableStepMatch = [regex]::Match($fullWorkflow,
-    '(?ms)^\s*- name: Load Stable release signing identity and policy\s*$.*?(?=^\s*- name:)')
-if (-not $stableStepMatch.Success -or
-    $stableStepMatch.Value -notmatch "if:\s*\$\{\{\s*github\.event\.client_payload\.channel == 'stable'\s*\}\}" -or
-    ([regex]::Matches($stableStepMatch.Value, '\$\{\{\s*secrets\.').Count -ne 3)) {
-    throw 'Stable signing secrets are not isolated to the Stable-only step'
+$fullBuildJobStart = $fullWorkflow.IndexOf("  build:`n", [StringComparison]::Ordinal)
+if ($fullBuildJobStart -lt 0) {
+    $fullBuildJobStart = $fullWorkflow.IndexOf("  build:`r`n", [StringComparison]::Ordinal)
 }
-$withoutStableStep = $fullWorkflow.Remove($stableStepMatch.Index, $stableStepMatch.Length)
-if ($withoutStableStep -match '\$\{\{\s*secrets\.' -or
-    $fullWorkflow -notmatch 'Full experimental release is explicitly UNSIGNED' -or
-    $fullWorkflow -notmatch 'FFB_SIGNING_CERT_THUMBPRINTS' -or
-    $fullWorkflow -notmatch "FFB_SIGNING_CERT_THUMBPRINTS\s+-split\s+','" -or
-    $fullWorkflow -notmatch 'foreach\s*\(\$thumbprint\s+in\s+\$thumbprints\)' -or
-    $fullWorkflow -notmatch 'Remove-Item[^\r\n]+-DeleteKey') {
-    throw 'Experimental Full release can reference signing state or cleanup is incomplete'
+$fullPublishJobStart = $fullWorkflow.IndexOf("  publish:", [StringComparison]::Ordinal)
+if ($fullBuildJobStart -lt 0 -or $fullPublishJobStart -le $fullBuildJobStart) {
+    throw 'Full release must split isolated build and hosted publication jobs'
+}
+$fullBuildJob = $fullWorkflow.Substring(
+    $fullBuildJobStart, $fullPublishJobStart - $fullBuildJobStart)
+$fullPublishJob = $fullWorkflow.Substring($fullPublishJobStart)
+if ($fullBuildJob -notmatch 'contents:\s+read' -or
+    $fullBuildJob -match 'contents:\s+write|id-token:\s+write|attestations:\s+write|environment:' -or
+    $fullBuildJob -match 'attest-build-provenance|publish-release-assets\.ps1|\$\{\{\s*secrets\.' -or
+    $fullBuildJob -notmatch 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02') {
+    throw 'Isolated Full build job must have read-only repository authority and data-only handoff'
+}
+if ($fullBuildJob.IndexOf('ref: ${{ github.sha }}', [StringComparison]::Ordinal) -lt 0 -or
+    $fullBuildJob.IndexOf('FFB_WORKFLOW_COMMIT: ${{ github.sha }}',
+        [StringComparison]::Ordinal) -lt 0 -or
+    $fullBuildJob -notmatch '\$headCommit\s+-cne\s+\$workflowCommit' -or
+    $fullBuildJob -notmatch '\$masterCommit\s+-cne\s+\$workflowCommit' -or
+    $fullBuildJob -notmatch '\$tagCommit\s+-cne\s+\$workflowCommit' -or
+    $fullBuildJob -match 'git merge-base --is-ancestor' -or
+    $fullBuildJob -notmatch 'RequireMasterHead\s*=\s*\$true') {
+    throw 'Isolated Full build must bind workflow SHA, checkout, current master, and tag exactly'
+}
+if ($fullPublishJob -notmatch 'needs:\s+build' -or
+    $fullPublishJob -notmatch 'runs-on:\s+windows-latest' -or
+    $fullPublishJob -notmatch 'environment:\s+stable-signing' -or
+    $fullPublishJob -notmatch 'contents:\s+write' -or
+    $fullPublishJob -notmatch 'id-token:\s+write' -or
+    $fullPublishJob -notmatch 'attestations:\s+write' -or
+    $fullPublishJob -match 'runs-on:\s*\[[^\]]*self-hosted' -or
+    $fullPublishJob -notmatch 'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093' -or
+    $fullPublishJob -notmatch 'Verify downloaded asset manifest without executing artifacts' -or
+    $fullPublishJob -notmatch 'verify-release-package-archive\.ps1' -or
+    $fullPublishJob -notmatch '-PackageKind\s+Launcher' -or
+    $fullPublishJob -notmatch '-PackageKind\s+SimHub' -or
+    $fullPublishJob -notmatch 'Get-ChildItem -LiteralPath release -Force') {
+    throw 'Hosted Full publication job is missing its isolated authority or data verification contract'
+}
+$hostedContractIndex = $fullPublishJob.IndexOf(
+    '- name: Validate hosted publication contract', [StringComparison]::Ordinal)
+$hostedControlsIndex = $fullPublishJob.IndexOf(
+    '- name: Snapshot hosted publication controls', [StringComparison]::Ordinal)
+if ($fullPublishJob.IndexOf('ref: ${{ github.sha }}', [StringComparison]::Ordinal) -lt 0 -or
+    $fullPublishJob.IndexOf('ref: ${{ needs.build.outputs.commit_sha }}',
+        [StringComparison]::Ordinal) -ge 0 -or
+    $hostedContractIndex -lt 0 -or $hostedControlsIndex -le $hostedContractIndex) {
+    throw 'Hosted publication must establish the workflow SHA as its trust root before loading repository controls'
+}
+$hostedContractStep = $fullPublishJob.Substring(
+    $hostedContractIndex, $hostedControlsIndex - $hostedContractIndex)
+foreach ($requiredHostedTrustFragment in @(
+    "git fetch --force --no-tags origin '+refs/heads/master:refs/remotes/origin/master'",
+    "git fetch --force --no-tags origin ('+{0}:{0}' -f `$tagRef)",
+    'FFB_WORKFLOW_COMMIT: ${{ github.sha }}',
+    '(git rev-parse refs/remotes/origin/master)',
+    '(git rev-parse "$tagRef^{commit}")',
+    '$workflowCommit -cne $head',
+    '$head -cne $master',
+    '$master -cne $tagCommit',
+    '$tagCommit -cne $env:FFB_RELEASE_COMMIT'
+)) {
+    if ($hostedContractStep.IndexOf($requiredHostedTrustFragment,
+            [StringComparison]::Ordinal) -lt 0) {
+        throw "Hosted publication does not independently bind master/tag/build output: $requiredHostedTrustFragment"
+    }
+}
+$hostedPreControlSource = $fullPublishJob.Substring(0, $hostedControlsIndex)
+if ($hostedPreControlSource -match '(?im)^\s*(?:\.|&)\s+[^\r\n]*\.ps1\b') {
+    throw 'Hosted publication executes repository PowerShell before establishing its independent trust root'
+}
+foreach ($requiredStaticVerifierFragment in @(
+    '[IO.FileShare]::Read',
+    '[StringComparer]::OrdinalIgnoreCase',
+    '$segment.Contains('':'')',
+    '$segment.EndsWith(''.'')',
+    '$segment.EndsWith('' '')',
+    'archive unexpectedly contains dinput8.dll.',
+    'archive unexpectedly redistributes a SimHub-owned SDK dependency:',
+    'archive contains a non-regular, link, or reparse file entry:',
+    'archive contains an unexpected file:',
+    'archive manifest hash mismatch:',
+    'archive manifest does not cover every payload file exactly once.'
+)) {
+    if ($launcherArchiveVerifier.IndexOf($requiredStaticVerifierFragment,
+            [StringComparison]::Ordinal) -lt 0) {
+        throw "Static Launcher archive verifier is missing a fail-closed contract: $requiredStaticVerifierFragment"
+    }
+}
+if ($launcherArchiveVerifier -match '(?im)^\s*(?:Start-Process|&\s+[^\r\n]*\.(?:exe|dll|cmd|ps1))\b' -or
+    $launcherArchiveVerifier -match 'ExtractToDirectory|Expand-Archive') {
+    throw 'Hosted static Launcher verifier must not extract or execute archive payloads'
+}
+if ($releasePublisher -notmatch 'Get-ChildItem -LiteralPath \$assetsRoot -Force' -or
+    $releasePublisher -notmatch '\$asset\.PSIsContainer' -or
+    $releasePublisher -notmatch 'FileAttributes\]::ReparsePoint') {
+    throw 'Release publisher must reject hidden, directory, and reparse children outside the exact asset set'
+}
+if ($fullPublishJob -notmatch '(?ms)FFB_TRUSTED_RELEASE_API:\s*\$\{\{ steps\.publish-controls\.outputs\.release_api \}\}.*?Publish verified complete experimental release' -or
+    $fullPublishJob -notmatch '\@\{ Path = \$env:FFB_TRUSTED_RELEASE_API; Sha256 = \$env:FFB_TRUSTED_RELEASE_API_SHA256 \}') {
+    throw 'Final hosted publisher does not revalidate its release-api dependency in the same step'
+}
+# Exercise the hosted pure-static Launcher verifier without executing or
+# extracting any package payload.  A canonical fixture must pass; a hidden
+# dinput8 payload, case-insensitive duplicate, and manifest tamper must fail.
+$launcherFixtureRoot = [IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetTempPath()) (
+    'ffb-static-launcher-' + [Guid]::NewGuid().ToString('N'))))
+$launcherFixturePrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+if (-not $launcherFixtureRoot.StartsWith(
+        $launcherFixturePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'Unsafe static Launcher fixture directory.'
+}
+try {
+    $fixtureVersion = '1.0.0'
+    $fixtureRootName = "FFBInterceptor-Launcher-$fixtureVersion"
+    $fixtureStage = Join-Path $launcherFixtureRoot 'stage'
+    $fixturePackageRoot = Join-Path $fixtureStage $fixtureRootName
+    $fixtureRelativeFiles = @(
+        'FFBInterceptor.Common.ps1',
+        'FFBInterceptor.Manager.exe',
+        'Start-FFBInterceptor.cmd',
+        'Start-FFBInterceptor.ps1',
+        'Install-SimHubPlugin.cmd',
+        'Install-SimHubPlugin.ps1',
+        'Uninstall-SimHubPlugin.cmd',
+        'Uninstall-SimHubPlugin.ps1',
+        'launcher/x64/FFBInterceptor.Launcher.exe',
+        'launcher/x64/FFBInterceptor.Hook.dll',
+        'launcher/x86/FFBInterceptor.Launcher.exe',
+        'launcher/x86/FFBInterceptor.Hook.dll',
+        'simhub/FFBInterceptor.SimHub.dll',
+        'simhub/FFBInterceptor.Core.dll',
+        'Dashboards/FFB Interceptor 800x480.simhubdash',
+        'Dashboards/FFB Interceptor Overlay 480x160.simhubdash',
+        'README.zh-TW.md',
+        'MANAGER.zh-TW.md',
+        'LICENSE',
+        'THIRD_PARTY_NOTICES.md',
+        'licenses/upstream-dcs-force-feedback-fix-MIT.txt'
+    )
+    foreach ($relative in $fixtureRelativeFiles) {
+        $destination = Join-Path $fixturePackageRoot $relative
+        [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination)) | Out-Null
+        [IO.File]::WriteAllText($destination, "fixture:$relative", [Text.UTF8Encoding]::new($false))
+    }
+    $fixtureManifest = @($fixtureRelativeFiles | Sort-Object | ForEach-Object {
+        "$(Get-FileHash -LiteralPath (Join-Path $fixturePackageRoot $_) -Algorithm SHA256 | Select-Object -ExpandProperty Hash)  $_"
+    })
+    [IO.File]::WriteAllLines((Join-Path $fixturePackageRoot 'SHA256SUMS.txt'),
+        $fixtureManifest, [Text.UTF8Encoding]::new($false))
+    . (Join-Path $root 'simhub\tools\ArchiveHelpers.ps1')
+    $validLauncherFixture = Join-Path $launcherFixtureRoot 'valid.zip'
+    New-CanonicalZipArchive -SourceDirectory $fixturePackageRoot `
+        -DestinationPath $validLauncherFixture -IncludeBaseDirectory
+    & $launcherArchiveVerifierPath -PackagePath $validLauncherFixture -Version $fixtureVersion `
+        -PackageKind Launcher | Out-Null
+
+    function Assert-StaticPackageRejected(
+        [string]$Path, [string]$Pattern, [string]$PackageKind = 'Launcher') {
+        try {
+            & $launcherArchiveVerifierPath -PackagePath $Path -Version $fixtureVersion `
+                -PackageKind $PackageKind | Out-Null
+        }
+        catch {
+            if ($_.Exception.Message -notmatch $Pattern) { throw }
+            return
+        }
+        throw "Static Launcher verifier accepted a rejected fixture: $Pattern"
+    }
+
+    function Set-RawZipUInt16 {
+        param(
+            [Parameter(Mandatory = $true)][byte[]]$Bytes,
+            [Parameter(Mandatory = $true)][int]$Offset,
+            [Parameter(Mandatory = $true)][uint16]$Value
+        )
+        if ($Offset -lt 0 -or $Offset + 2 -gt $Bytes.Length) {
+            throw "Raw ZIP UInt16 mutation is outside the fixture: $Offset"
+        }
+        $encoded = [BitConverter]::GetBytes($Value)
+        [Array]::Copy($encoded, 0, $Bytes, $Offset, $encoded.Length)
+    }
+
+    function Set-RawZipUInt32 {
+        param(
+            [Parameter(Mandatory = $true)][byte[]]$Bytes,
+            [Parameter(Mandatory = $true)][int]$Offset,
+            [Parameter(Mandatory = $true)][uint32]$Value
+        )
+        if ($Offset -lt 0 -or $Offset + 4 -gt $Bytes.Length) {
+            throw "Raw ZIP UInt32 mutation is outside the fixture: $Offset"
+        }
+        $encoded = [BitConverter]::GetBytes($Value)
+        [Array]::Copy($encoded, 0, $Bytes, $Offset, $encoded.Length)
+    }
+
+    function Find-RawZipSequenceOffsets {
+        param(
+            [Parameter(Mandatory = $true)][byte[]]$Bytes,
+            [Parameter(Mandatory = $true)][byte[]]$Needle
+        )
+        if ($Needle.Length -lt 1 -or $Needle.Length -gt $Bytes.Length) {
+            throw 'Raw ZIP byte-sequence search has invalid bounds.'
+        }
+        $offsets = [Collections.Generic.List[int]]::new()
+        for ($offset = 0; $offset -le $Bytes.Length - $Needle.Length; ++$offset) {
+            $matches = $true
+            for ($index = 0; $index -lt $Needle.Length; ++$index) {
+                if ($Bytes[$offset + $index] -ne $Needle[$index]) {
+                    $matches = $false
+                    break
+                }
+            }
+            if ($matches) { $offsets.Add($offset) }
+        }
+        return $offsets.ToArray()
+    }
+
+    function New-RawStaticPackageMutation {
+        param(
+            [Parameter(Mandatory = $true)][string]$SourcePath,
+            [Parameter(Mandatory = $true)][string]$DestinationPath,
+            [Parameter(Mandatory = $true)][scriptblock]$Mutation
+        )
+        if (Test-Path -LiteralPath $DestinationPath) {
+            throw "Raw ZIP fixture already exists: $DestinationPath"
+        }
+        $bytes = [IO.File]::ReadAllBytes($SourcePath)
+        if ($bytes.Length -lt 22) { throw 'Canonical raw ZIP fixture is truncated.' }
+        $eocdOffset = $bytes.Length - 22
+        if ([BitConverter]::ToUInt32($bytes, 0) -ne 0x04034B50 -or
+            [BitConverter]::ToUInt32($bytes, $eocdOffset) -ne 0x06054B50) {
+            throw 'Canonical raw ZIP fixture does not have fixed local/EOCD records.'
+        }
+        $centralOffsetValue = [BitConverter]::ToUInt32($bytes, $eocdOffset + 16)
+        if ($centralOffsetValue -gt [int]::MaxValue) {
+            throw 'Canonical raw ZIP central directory offset is outside test bounds.'
+        }
+        $centralOffset = [int]$centralOffsetValue
+        if ($centralOffset -lt 30 -or $centralOffset + 46 -gt $eocdOffset -or
+            [BitConverter]::ToUInt32($bytes, $centralOffset) -ne 0x02014B50) {
+            throw 'Canonical raw ZIP fixture has no usable central-directory record.'
+        }
+        & $Mutation $bytes 0 $centralOffset $eocdOffset
+        [IO.File]::WriteAllBytes($DestinationPath, $bytes)
+    }
+
+    function Assert-RawStaticPackageMutationRejected {
+        param(
+            [Parameter(Mandatory = $true)][string]$FixtureName,
+            [Parameter(Mandatory = $true)][string]$Pattern,
+            [Parameter(Mandatory = $true)][scriptblock]$Mutation
+        )
+        $fixturePath = Join-Path $launcherFixtureRoot $FixtureName
+        New-RawStaticPackageMutation -SourcePath $validLauncherFixture -DestinationPath $fixturePath -Mutation $Mutation
+        Assert-StaticPackageRejected -Path $fixturePath -Pattern $Pattern
+    }
+
+    $dinputFixture = Join-Path $launcherFixtureRoot 'dinput.zip'
+    $dinputPath = Join-Path $fixturePackageRoot 'dinput8.dll'
+    try {
+        [IO.File]::WriteAllText($dinputPath, 'forbidden', [Text.UTF8Encoding]::new($false))
+        New-CanonicalZipArchive -SourceDirectory $fixturePackageRoot `
+            -DestinationPath $dinputFixture -IncludeBaseDirectory
+    }
+    finally { if (Test-Path -LiteralPath $dinputPath) { Remove-Item -LiteralPath $dinputPath -Force } }
+    Assert-StaticPackageRejected -Path $dinputFixture -Pattern 'dinput8\.dll'
+
+    $duplicateFixture = Join-Path $launcherFixtureRoot 'duplicate.zip'
+    # Mutate both raw name fields without allowing ZipArchive.Update to rewrite
+    # flags, methods, timestamps, or extras. The headers remain canonical and
+    # the fixture must therefore reach the case-insensitive duplicate-name gate.
+    $duplicateSourceName = "$fixtureRootName/launcher/x86/FFBInterceptor.Hook.dll"
+    $duplicateReplacementName = "$fixtureRootName/LAUNCHER/X64/FFBInterceptor.Hook.dll"
+    New-RawStaticPackageMutation -SourcePath $validLauncherFixture -DestinationPath $duplicateFixture -Mutation {
+        param([byte[]]$bytes, [int]$localOffset, [int]$centralOffset, [int]$eocdOffset)
+        $utf8 = [Text.UTF8Encoding]::new($false, $true)
+        $sourceNameBytes = $utf8.GetBytes($duplicateSourceName)
+        $replacementNameBytes = $utf8.GetBytes($duplicateReplacementName)
+        $nameOffsets = @(Find-RawZipSequenceOffsets -Bytes $bytes -Needle $sourceNameBytes)
+        if ($nameOffsets.Count -ne 2 -or
+            $replacementNameBytes.Length -ne $sourceNameBytes.Length) {
+            throw 'Canonical duplicate fixture did not expose matching local and central names.'
+        }
+        foreach ($nameOffset in $nameOffsets) {
+            [Array]::Copy($replacementNameBytes, 0, $bytes,
+                $nameOffset, $replacementNameBytes.Length)
+        }
+    }
+    Assert-StaticPackageRejected -Path $duplicateFixture `
+        -Pattern 'unsafe or case-insensitive duplicate entry:'
+
+    # Exercise individual canonical ZIP fields as raw bytes. Each mutation
+    # starts from the already accepted fixture, so rejection proves that the
+    # intended field fails closed instead of relying on a library rewrite.
+    Assert-RawStaticPackageMutationRejected -FixtureName 'utf8-flag.zip' -Pattern 'local header is not canonical stored UTF-8 ZIP' -Mutation {
+        param([byte[]]$bytes, [int]$localOffset, [int]$centralOffset, [int]$eocdOffset)
+        Set-RawZipUInt16 -Bytes $bytes -Offset ($localOffset + 6) -Value 0
+    }
+    Assert-RawStaticPackageMutationRejected -FixtureName 'descriptor-flag.zip' -Pattern 'local header is not canonical stored UTF-8 ZIP' -Mutation {
+        param([byte[]]$bytes, [int]$localOffset, [int]$centralOffset, [int]$eocdOffset)
+        Set-RawZipUInt16 -Bytes $bytes -Offset ($localOffset + 6) -Value 0x0808
+    }
+    Assert-RawStaticPackageMutationRejected -FixtureName 'compression-method.zip' -Pattern 'local header is not canonical stored UTF-8 ZIP' -Mutation {
+        param([byte[]]$bytes, [int]$localOffset, [int]$centralOffset, [int]$eocdOffset)
+        Set-RawZipUInt16 -Bytes $bytes -Offset ($localOffset + 8) -Value 8
+    }
+    Assert-RawStaticPackageMutationRejected -FixtureName 'local-extra.zip' -Pattern 'local header is not canonical stored UTF-8 ZIP' -Mutation {
+        param([byte[]]$bytes, [int]$localOffset, [int]$centralOffset, [int]$eocdOffset)
+        Set-RawZipUInt16 -Bytes $bytes -Offset ($localOffset + 28) -Value 1
+    }
+    Assert-RawStaticPackageMutationRejected -FixtureName 'central-extra.zip' -Pattern 'central/local metadata mismatch:' -Mutation {
+        param([byte[]]$bytes, [int]$localOffset, [int]$centralOffset, [int]$eocdOffset)
+        Set-RawZipUInt16 -Bytes $bytes -Offset ($centralOffset + 30) -Value 1
+    }
+    Assert-RawStaticPackageMutationRejected -FixtureName 'local-crc.zip' -Pattern 'local payload size or CRC is invalid:' -Mutation {
+        param([byte[]]$bytes, [int]$localOffset, [int]$centralOffset, [int]$eocdOffset)
+        $crc32 = [BitConverter]::ToUInt32($bytes, $localOffset + 14)
+        Set-RawZipUInt32 -Bytes $bytes -Offset ($localOffset + 14) -Value ([uint32]($crc32 -bxor 1))
+    }
+    Assert-RawStaticPackageMutationRejected -FixtureName 'central-size.zip' -Pattern 'central/local metadata mismatch:' -Mutation {
+        param([byte[]]$bytes, [int]$localOffset, [int]$centralOffset, [int]$eocdOffset)
+        $size = [BitConverter]::ToUInt32($bytes, $centralOffset + 24)
+        Set-RawZipUInt32 -Bytes $bytes -Offset ($centralOffset + 24) -Value ([uint32]($size -bxor 1))
+    }
+    Assert-RawStaticPackageMutationRejected -FixtureName 'entry-count.zip' -Pattern 'EOCD is not canonical or has trailing/overlapping data' -Mutation {
+        param([byte[]]$bytes, [int]$localOffset, [int]$centralOffset, [int]$eocdOffset)
+        Set-RawZipUInt16 -Bytes $bytes -Offset ($eocdOffset + 8) -Value 0
+    }
+
+    # Keep the central-directory name safe while changing only the local
+    # header name.  ZipArchive consumers often expose only the former; the
+    # byte-level canonical gate must detect the parser differential.
+    $nameMismatchFixture = Join-Path $launcherFixtureRoot 'name-mismatch.zip'
+    $nameMismatchBytes = [IO.File]::ReadAllBytes($validLauncherFixture)
+    $localNameBytes = [Text.Encoding]::UTF8.GetBytes("$fixtureRootName/README.zh-TW.md")
+    $replacementNameBytes = [Text.Encoding]::UTF8.GetBytes("$fixtureRootName/README.ZH-TW.md")
+    $nameOffsets = [Collections.Generic.List[int]]::new()
+    for ($offset = 0; $offset -le $nameMismatchBytes.Length - $localNameBytes.Length; ++$offset) {
+        $matchesName = $true
+        for ($byteIndex = 0; $byteIndex -lt $localNameBytes.Length; ++$byteIndex) {
+            if ($nameMismatchBytes[$offset + $byteIndex] -ne $localNameBytes[$byteIndex]) {
+                $matchesName = $false
+                break
+            }
+        }
+        if ($matchesName) { $nameOffsets.Add($offset) }
+    }
+    if ($nameOffsets.Count -ne 2 -or
+        $replacementNameBytes.Length -ne $localNameBytes.Length) {
+        throw 'Canonical name-mismatch fixture did not expose exactly one local and central name.'
+    }
+    [Array]::Copy($replacementNameBytes, 0, $nameMismatchBytes,
+        $nameOffsets[0], $replacementNameBytes.Length)
+    [IO.File]::WriteAllBytes($nameMismatchFixture, $nameMismatchBytes)
+    Assert-StaticPackageRejected -Path $nameMismatchFixture `
+        -Pattern 'central/local entry-name mismatch'
+
+    $trailingFixture = Join-Path $launcherFixtureRoot 'trailing.zip'
+    $trailingBytes = [byte[]]::new($nameMismatchBytes.Length + 1)
+    $validBytes = [IO.File]::ReadAllBytes($validLauncherFixture)
+    [Array]::Copy($validBytes, $trailingBytes, $validBytes.Length)
+    $trailingBytes[$trailingBytes.Length - 1] = 0x41
+    [IO.File]::WriteAllBytes($trailingFixture, $trailingBytes)
+    Assert-StaticPackageRejected -Path $trailingFixture `
+        -Pattern 'single-disk EOCD|trailing/overlapping'
+
+    $specialTypeFixture = Join-Path $launcherFixtureRoot 'special-type.zip'
+    # Canonical v1 requires zero external attributes, so mutate only that raw
+    # field to a Unix symlink type. This must fail at canonical metadata. The
+    # later non-regular-entry check remains defense in depth for future formats
+    # and is intentionally unreachable for a canonical v1 special-type entry.
+    New-RawStaticPackageMutation -SourcePath $validLauncherFixture -DestinationPath $specialTypeFixture -Mutation {
+        param([byte[]]$bytes, [int]$localOffset, [int]$centralOffset, [int]$eocdOffset)
+        Set-RawZipUInt32 -Bytes $bytes -Offset ($centralOffset + 38) -Value ([Convert]::ToUInt32('A0000000', 16))
+    }
+    Assert-StaticPackageRejected -Path $specialTypeFixture `
+        -Pattern 'central/local metadata mismatch:'
+
+    $manifestFixture = Join-Path $launcherFixtureRoot 'manifest.zip'
+    $manifestSourcePath = Join-Path $fixturePackageRoot 'SHA256SUMS.txt'
+    $manifestSourceBytes = [IO.File]::ReadAllBytes($manifestSourcePath)
+    try {
+        [IO.File]::WriteAllText($manifestSourcePath,
+            "$('0' * 64)  README.zh-TW.md`n", [Text.UTF8Encoding]::new($false))
+        New-CanonicalZipArchive -SourceDirectory $fixturePackageRoot `
+            -DestinationPath $manifestFixture -IncludeBaseDirectory
+    }
+    finally { [IO.File]::WriteAllBytes($manifestSourcePath, $manifestSourceBytes) }
+    Assert-StaticPackageRejected -Path $manifestFixture -Pattern 'manifest (?:hash mismatch|does not cover)'
+
+    $simHubRootName = "FFBInterceptor-SimHub-$fixtureVersion"
+    $simHubStage = Join-Path $launcherFixtureRoot 'simhub-stage'
+    $simHubPackageRoot = Join-Path $simHubStage $simHubRootName
+    $simHubRelativeFiles = @(
+        'FFBInterceptor.Common.ps1',
+        'Install-SimHubPlugin.cmd',
+        'Install-SimHubPlugin.ps1',
+        'Uninstall-SimHubPlugin.cmd',
+        'Uninstall-SimHubPlugin.ps1',
+        'simhub/FFBInterceptor.SimHub.dll',
+        'simhub/FFBInterceptor.Core.dll',
+        'Dashboards/FFB Interceptor 800x480.simhubdash',
+        'Dashboards/FFB Interceptor Overlay 480x160.simhubdash',
+        'INSTALL.zh-TW.md',
+        'SIMHUB-README.md',
+        'LICENSE',
+        'THIRD_PARTY_NOTICES.md',
+        'licenses/upstream-dcs-force-feedback-fix-MIT.txt'
+    )
+    foreach ($relative in $simHubRelativeFiles) {
+        $destination = Join-Path $simHubPackageRoot $relative
+        [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($destination)) | Out-Null
+        [IO.File]::WriteAllText($destination, "simhub-fixture:$relative",
+            [Text.UTF8Encoding]::new($false))
+    }
+    $simHubManifest = @($simHubRelativeFiles | Sort-Object | ForEach-Object {
+        "$(Get-FileHash -LiteralPath (Join-Path $simHubPackageRoot $_) -Algorithm SHA256 | Select-Object -ExpandProperty Hash)  $_"
+    })
+    [IO.File]::WriteAllLines((Join-Path $simHubPackageRoot 'SHA256SUMS.txt'),
+        $simHubManifest, [Text.UTF8Encoding]::new($false))
+    $validSimHubFixture = Join-Path $launcherFixtureRoot 'valid-simhub.zip'
+    New-CanonicalZipArchive -SourceDirectory $simHubPackageRoot `
+        -DestinationPath $validSimHubFixture -IncludeBaseDirectory
+    & $launcherArchiveVerifierPath -PackagePath $validSimHubFixture -Version $fixtureVersion `
+        -PackageKind SimHub | Out-Null
+
+    $sdkLeakFixture = Join-Path $launcherFixtureRoot 'sdk-leak.zip'
+    $sdkLeakPath = Join-Path $simHubPackageRoot 'simhub\SimHub.Plugins.dll'
+    try {
+        [IO.File]::WriteAllText($sdkLeakPath, 'proprietary-sdk-leak',
+            [Text.UTF8Encoding]::new($false))
+        New-CanonicalZipArchive -SourceDirectory $simHubPackageRoot `
+            -DestinationPath $sdkLeakFixture -IncludeBaseDirectory
+    }
+    finally { if (Test-Path -LiteralPath $sdkLeakPath) { Remove-Item -LiteralPath $sdkLeakPath -Force } }
+    Assert-StaticPackageRejected -Path $sdkLeakFixture `
+        -Pattern 'SimHub-owned SDK dependency' -PackageKind SimHub
+}
+finally {
+    if (Test-Path -LiteralPath $launcherFixtureRoot) {
+        Remove-Item -LiteralPath $launcherFixtureRoot -Recurse -Force
+    }
+}
+$downloadIndex = $fullPublishJob.IndexOf('- name: Download untrusted build data',
+    [StringComparison]::Ordinal)
+$manifestIndex = $fullPublishJob.IndexOf(
+    '- name: Verify downloaded asset manifest without executing artifacts',
+    [StringComparison]::Ordinal)
+$revalidateIndex = $fullPublishJob.IndexOf(
+    '- name: Revalidate exact tag, checks, and release slot',
+    [StringComparison]::Ordinal)
+$attestIndex = $fullPublishJob.IndexOf('- name: Attest complete release provenance',
+    [StringComparison]::Ordinal)
+$publishIndex = $fullPublishJob.IndexOf(
+    '- name: Publish verified complete experimental release',
+    [StringComparison]::Ordinal)
+if ($downloadIndex -lt 0 -or $manifestIndex -le $downloadIndex -or
+    $revalidateIndex -le $manifestIndex -or $attestIndex -le $revalidateIndex -or
+    $publishIndex -le $attestIndex) {
+    throw 'Hosted publication must verify untrusted data and release state before attestation/publication'
+}
+$finalPublishBlock = $fullPublishJob.Substring($publishIndex)
+if ($finalPublishBlock -notmatch 'FFB_TRUSTED_WAIT_REQUIRED_CHECKS:\s*\$\{\{ steps\.publish-controls\.outputs\.wait_required_checks \}\}' -or
+    $finalPublishBlock -notmatch '\@\{ Path = \$env:FFB_TRUSTED_WAIT_REQUIRED_CHECKS; Sha256 = \$env:FFB_TRUSTED_WAIT_REQUIRED_CHECKS_SHA256 \}' -or
+    $finalPublishBlock -notmatch '&\s+\$env:FFB_TRUSTED_WAIT_REQUIRED_CHECKS\s+`\s*\r?\n\s*-Repository\s+\$env:GITHUB_REPOSITORY\s+-CommitSha\s+\$env:FFB_RELEASE_COMMIT') {
+    throw 'Final hosted publisher does not revalidate exact-commit checks immediately before mutation'
 }
 
 # Exercise exact remote tag/master binding in an isolated repository. The

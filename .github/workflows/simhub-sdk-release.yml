@@ -17,21 +17,22 @@ env:
 
 jobs:
   build:
-    name: sdk-package-attest-and-publish
+    name: isolated-sdk-build-and-package
     if: ${{ github.event_name == 'repository_dispatch' && github.ref == 'refs/heads/master' }}
     timeout-minutes: 120
-    environment: stable-signing
     runs-on: [self-hosted, Windows, X64, simhub-sdk, ephemeral, ffb-release]
+    outputs:
+      commit_sha: ${{ steps.bind-release.outputs.commit_sha }}
+      release_id: ${{ steps.release-preflight.outputs.release_id }}
+      release_state: ${{ steps.release-preflight.outputs.release_state }}
     permissions:
       actions: read # inspect workflow checks for the tagged commit
       checks: read # inspect check runs for the tagged commit
-      contents: write # publish immutable assets to the requested tag
-      id-token: write # mint the OIDC identity used by provenance
-      attestations: write # store provenance for every release asset
+      contents: read # checkout and inspect release state without publication authority
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: refs/heads/master
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Validate repository dispatch payload
@@ -39,7 +40,14 @@ jobs:
         shell: pwsh
         env:
           FFB_CLIENT_PAYLOAD_JSON: ${{ toJson(github.event.client_payload) }}
+          FFB_WORKFLOW_COMMIT: ${{ github.sha }}
         run: |
+          $workflowCommit = $env:FFB_WORKFLOW_COMMIT.ToLowerInvariant()
+          $checkoutCommit = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          if ($workflowCommit -cnotmatch '^[0-9a-f]{40}\z' -or
+              $checkoutCommit -cne $workflowCommit) {
+            throw 'Full release must begin from the exact repository_dispatch workflow commit.'
+          }
           $payload = $env:FFB_CLIENT_PAYLOAD_JSON | ConvertFrom-Json -ErrorAction Stop
           $names = @($payload.PSObject.Properties | ForEach-Object Name | Sort-Object)
           $expectedNames = @('channel', 'simhub_path', 'tag')
@@ -54,8 +62,8 @@ jobs:
               $tag -cnotmatch '^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\z') {
             throw 'Full release client_payload.tag must be a canonical vX.Y.Z tag.'
           }
-          if ($channel -cne $env:RELEASE_CHANNEL -or $channel -cnotin @('experimental', 'stable')) {
-            throw 'Full release client_payload.channel must be exactly experimental or stable.'
+          if ($channel -cne $env:RELEASE_CHANNEL -or $channel -cne 'experimental') {
+            throw 'Full release currently accepts only the unsigned experimental channel.'
           }
           if ([string]::IsNullOrWhiteSpace($simHubPath) -or $simHubPath.Length -gt 1024 -or
               $simHubPath -notmatch '^[A-Za-z]:\\' -or
@@ -78,11 +86,8 @@ jobs:
           foreach ($name in @(
             'release-api.ps1',
             'assert-release-assets-empty.ps1',
-            'publish-release-assets.ps1',
             'verify-release-ref.ps1',
-            'wait-required-checks.ps1',
-            'import-signing-certificate.ps1',
-            'sign-windows-artifacts.ps1'
+            'wait-required-checks.ps1'
           )) {
             Copy-Item -LiteralPath (Join-Path '.github/scripts' $name) -Destination $controlRoot
           }
@@ -91,16 +96,10 @@ jobs:
             "release_api_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'release-api.ps1') -Algorithm SHA256).Hash)",
             "release_preflight=$(Join-Path $controlRoot 'assert-release-assets-empty.ps1')",
             "release_preflight_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'assert-release-assets-empty.ps1') -Algorithm SHA256).Hash)",
-            "publisher=$(Join-Path $controlRoot 'publish-release-assets.ps1')",
-            "publisher_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'publish-release-assets.ps1') -Algorithm SHA256).Hash)",
             "verify_release_ref=$(Join-Path $controlRoot 'verify-release-ref.ps1')",
             "verify_release_ref_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'verify-release-ref.ps1') -Algorithm SHA256).Hash)",
             "wait_required_checks=$(Join-Path $controlRoot 'wait-required-checks.ps1')",
-            "wait_required_checks_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'wait-required-checks.ps1') -Algorithm SHA256).Hash)",
-            "import_signing_certificate=$(Join-Path $controlRoot 'import-signing-certificate.ps1')",
-            "import_signing_certificate_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'import-signing-certificate.ps1') -Algorithm SHA256).Hash)",
-            "sign_windows_artifacts=$(Join-Path $controlRoot 'sign-windows-artifacts.ps1')",
-            "sign_windows_artifacts_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'sign-windows-artifacts.ps1') -Algorithm SHA256).Hash)"
+            "wait_required_checks_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'wait-required-checks.ps1') -Algorithm SHA256).Hash)"
           ) | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Preflight release recovery state
         id: release-preflight
@@ -173,6 +172,7 @@ jobs:
           RELEASE_TAG: ${{ github.event.client_payload.tag }}
           RELEASE_CHANNEL: ${{ github.event.client_payload.channel }}
           FFB_RELEASE_STATE: ${{ steps.release-preflight.outputs.release_state }}
+          FFB_WORKFLOW_COMMIT: ${{ github.sha }}
         run: |
           git fetch --force --no-tags origin '+refs/heads/master:refs/remotes/origin/master'
           if ($LASTEXITCODE -ne 0) { throw 'Unable to refresh origin/master before binding the release ref.' }
@@ -186,20 +186,12 @@ jobs:
           foreach ($commit in @($headCommit, $masterCommit, $tagCommit)) {
             if ($commit -notmatch '^[0-9a-f]{40}$') { throw 'Release binding produced an invalid commit SHA.' }
           }
-          if ($headCommit -cne $masterCommit) {
-            throw "Trusted master checkout mismatch: HEAD=$headCommit, origin/master=$masterCommit"
-          }
-          if ($env:FFB_RELEASE_STATE -eq 'draft-recovery') {
-            if ($env:RELEASE_CHANNEL -eq 'stable') {
-              throw 'Stable channel cannot resume an existing draft; use a fresh tag at current master HEAD.'
-            }
-            git merge-base --is-ancestor $tagCommit refs/remotes/origin/master
-            if ($LASTEXITCODE -ne 0) {
-              throw "Recovery draft tag $env:RELEASE_TAG is not an ancestor of origin/master."
-            }
-          }
-          elseif ($tagCommit -cne $masterCommit) {
-            throw "Release tag $env:RELEASE_TAG must equal current origin/master HEAD outside draft recovery."
+          $workflowCommit = $env:FFB_WORKFLOW_COMMIT.ToLowerInvariant()
+          if ($workflowCommit -cnotmatch '^[0-9a-f]{40}\z' -or
+              $headCommit -cne $workflowCommit -or
+              $masterCommit -cne $workflowCommit -or
+              $tagCommit -cne $workflowCommit) {
+            throw 'Full release requires workflow commit, checkout, origin/master, and tag to identify one exact commit.'
           }
           "commit_sha=$tagCommit" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -291,9 +283,10 @@ jobs:
               throw "Trusted release control failed SHA-256 verification: $($trustedFile.Path)"
             }
           }
-          $verifyArguments = @{ RefreshRemote = $true; ExpectedCommitSha = $env:FFB_RELEASE_COMMIT }
-          if ($env:FFB_RELEASE_STATE -ne 'draft-recovery') {
-            $verifyArguments.RequireMasterHead = $true
+          $verifyArguments = @{
+            RefreshRemote = $true
+            ExpectedCommitSha = $env:FFB_RELEASE_COMMIT
+            RequireMasterHead = $true
           }
           & $env:FFB_TRUSTED_VERIFY_RELEASE_REF @verifyArguments
           & $env:FFB_TRUSTED_WAIT_REQUIRED_CHECKS `
@@ -323,7 +316,6 @@ jobs:
           uv python find 3.13.15 --managed-python
           if ($LASTEXITCODE -ne 0) { throw 'uv-managed Python 3.13 was not found after installation.' }
       - name: Configure unsigned Full experimental channel
-        if: ${{ github.event.client_payload.channel == 'experimental' }}
         shell: pwsh
         run: |
           @(
@@ -333,80 +325,177 @@ jobs:
             'FFB_REMOVE_SIGNING_CERTIFICATE=0'
           ) | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host 'Full experimental release is explicitly UNSIGNED.'
-      - name: Load Stable release signing identity and policy
-        if: ${{ github.event.client_payload.channel == 'stable' }}
-        shell: pwsh
-        env:
-          FFB_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_PFX_BASE64 }}
-          FFB_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PFX_PASSWORD }}
-          FFB_EXPECTED_SIGNER_SHA256: ${{ secrets.WINDOWS_SIGNER_SHA256 }}
-          FFB_TRUSTED_IMPORT_SIGNING_CERTIFICATE: ${{ steps.trusted-controls.outputs.import_signing_certificate }}
-          FFB_TRUSTED_IMPORT_SIGNING_CERTIFICATE_SHA256: ${{ steps.trusted-controls.outputs.import_signing_certificate_sha256 }}
-        run: |
-          if ($env:FFB_TRUSTED_IMPORT_SIGNING_CERTIFICATE_SHA256 -cnotmatch '^[A-F0-9]{64}$' -or
-              -not (Test-Path -LiteralPath $env:FFB_TRUSTED_IMPORT_SIGNING_CERTIFICATE -PathType Leaf) -or
-              (Get-FileHash -LiteralPath $env:FFB_TRUSTED_IMPORT_SIGNING_CERTIFICATE -Algorithm SHA256).Hash `
-                -cne $env:FFB_TRUSTED_IMPORT_SIGNING_CERTIFICATE_SHA256) {
-            throw 'Trusted signing-certificate importer failed SHA-256 verification.'
-          }
-          & $env:FFB_TRUSTED_IMPORT_SIGNING_CERTIFICATE -RequireSigning
-      - name: Build channel-policy launcher, hook, manager, and tests
+      - name: Validate host-pinned Visual Studio toolchains
         id: build-toolchain
         shell: pwsh
         env:
-          RELEASE_CHANNEL: ${{ github.event.client_payload.channel }}
-          FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS: ${{ steps.trusted-controls.outputs.sign_windows_artifacts }}
-          FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS_SHA256: ${{ steps.trusted-controls.outputs.sign_windows_artifacts_sha256 }}
+          FFB_VALIDATED_SIMHUB_PATH: ${{ steps.validated-payload.outputs.simhub_install_path }}
         run: |
-          $stable = $env:RELEASE_CHANNEL -eq 'stable'
-          function Restore-FFBTrustedSigner {
-            if ($env:FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS_SHA256 -cnotmatch '^[A-F0-9]{64}$' -or
-                -not (Test-Path -LiteralPath $env:FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS -PathType Leaf)) {
-              throw 'Trusted signer path or SHA-256 binding is invalid.'
+          function Resolve-HostToolchain {
+            param([string]$Path, [string]$Sha256, [string]$Architecture)
+            if ($Sha256 -cnotmatch '^[A-F0-9]{64}$') {
+              throw "$Architecture host toolchain requires an uppercase SHA-256 pin."
             }
-            $trustedBytes = [IO.File]::ReadAllBytes($env:FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS)
-            $sha256 = [Security.Cryptography.SHA256]::Create()
+            $resolved = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
+            $safePattern = '^C:\\ffb-v1-[0-9a-f]{32}\\Toolchain\\' +
+              [regex]::Escape($Architecture) + '\.cmd\z'
+            if ($resolved -notmatch $safePattern -or
+                $resolved.IndexOfAny([char[]]'%!^&|<>') -ge 0) {
+              throw "$Architecture host toolchain is outside its bound disposable runtime path."
+            }
+            if ([IO.Path]::GetExtension($resolved) -cne '.cmd') {
+              throw "$Architecture host toolchain must be a .cmd snapshot."
+            }
+            $item = Get-Item -LiteralPath $resolved -Force
+            $toolchainDirectory = Get-Item -LiteralPath ([IO.Path]::GetDirectoryName($resolved)) -Force
+            $runtimeDirectory = Get-Item -LiteralPath $toolchainDirectory.Parent.FullName -Force
+            foreach ($entry in @($item, $toolchainDirectory, $runtimeDirectory)) {
+              if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "$Architecture host toolchain path contains a reparse point."
+              }
+            }
+            if (($item.Attributes -band [IO.FileAttributes]::ReadOnly) -ne 0 -or
+                (Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash -cne $Sha256) {
+              throw "$Architecture host toolchain snapshot failed integrity validation."
+            }
+            $lines = [IO.File]::ReadAllLines($resolved)
+            if ($lines.Count -lt 2 -or $lines[0] -cne '@echo off') {
+              throw "$Architecture host toolchain snapshot has an invalid header."
+            }
+            $allowedNames = @(
+              'CommandPromptType', 'DevEnvDir', 'ExtensionSdkDir', 'FrameworkDir',
+              'FrameworkDir32', 'FrameworkVersion', 'FrameworkVersion32', 'INCLUDE', 'LIB',
+              'LIBPATH', 'NETFXSDKDir', 'PATH', 'UCRTVersion', 'UniversalCRTSdkDir',
+              'VCIDEInstallDir', 'VCINSTALLDIR', 'VCToolsInstallDir', 'VCToolsRedistDir',
+              'VisualStudioVersion', 'VSINSTALLDIR', 'VSCMD_ARG_app_plat',
+              'VSCMD_ARG_HOST_ARCH', 'VSCMD_ARG_TGT_ARCH', 'VSCMD_VER', 'WindowsLibPath',
+              'WindowsSdkBinPath', 'WindowsSdkDir', 'WindowsSDKLibVersion', 'WindowsSDKVersion'
+            )
+            $values = [Collections.Generic.Dictionary[string,string]]::new(
+              [StringComparer]::OrdinalIgnoreCase)
+            foreach ($line in $lines[1..($lines.Count - 1)]) {
+              if ($line.IndexOfAny([char[]]'%!^&|<>') -ge 0 -or
+                  $line -cnotmatch '^set "(?<name>[A-Za-z_][A-Za-z0-9_()]*)=(?<value>[^"\r\n]*)"\z' -or
+                  $allowedNames -notcontains $Matches.name -or
+                  -not $values.TryAdd($Matches.name, $Matches.value)) {
+                throw "$Architecture host toolchain snapshot contains an unsafe or duplicate command."
+              }
+            }
+            foreach ($requiredName in @(
+              'PATH', 'INCLUDE', 'LIB', 'LIBPATH', 'VCINSTALLDIR', 'VCToolsInstallDir',
+              'VSINSTALLDIR', 'WindowsSdkDir', 'VSCMD_ARG_HOST_ARCH', 'VSCMD_ARG_TGT_ARCH'
+            )) {
+              if (-not $values.ContainsKey($requiredName) -or
+                  [string]::IsNullOrWhiteSpace($values[$requiredName])) {
+                throw "$Architecture host toolchain snapshot is missing $requiredName."
+              }
+            }
+            if ($values['VSCMD_ARG_TGT_ARCH'] -cne $Architecture -or
+                $values['VSCMD_ARG_HOST_ARCH'] -cne 'x64') {
+              throw "$Architecture host toolchain snapshot has the wrong architecture."
+            }
+            $stream = $null
+            $fileWriteDenied = $false
             try {
-              $trustedHash = [BitConverter]::ToString($sha256.ComputeHash($trustedBytes)).Replace('-', '')
+              $stream = [IO.File]::Open($resolved, [IO.FileMode]::Open,
+                [IO.FileAccess]::Write, [IO.FileShare]::Read)
             }
-            finally { $sha256.Dispose() }
-            if ($trustedHash -cne $env:FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS_SHA256) {
-              throw 'Trusted signer source failed SHA-256 verification.'
+            catch [UnauthorizedAccessException] { $fileWriteDenied = $true }
+            finally { if ($stream) { $stream.Dispose() } }
+            if (-not $fileWriteDenied) {
+              throw "$Architecture host toolchain snapshot is writable by the release job."
             }
-            $scriptsDirectory = (Resolve-Path -LiteralPath '.github/scripts' -ErrorAction Stop).Path
-            $tagBuildSigner = Join-Path $scriptsDirectory 'sign-windows-artifacts.ps1'
-            [IO.File]::WriteAllBytes($tagBuildSigner, $trustedBytes)
-            if ((Get-FileHash -LiteralPath $tagBuildSigner -Algorithm SHA256).Hash -cne $trustedHash) {
-              throw 'Trusted signer copy failed SHA-256 verification.'
+            $probePath = Join-Path $toolchainDirectory.FullName `
+              ('.ffb-directory-write-probe-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+            $probeStream = $null
+            $directoryWriteDenied = $false
+            try {
+              $probeStream = [IO.File]::Open($probePath, [IO.FileMode]::CreateNew,
+                [IO.FileAccess]::Write, [IO.FileShare]::None)
+            }
+            catch [UnauthorizedAccessException] { $directoryWriteDenied = $true }
+            finally {
+              if ($probeStream) { $probeStream.Dispose() }
+              if (Test-Path -LiteralPath $probePath) {
+                Remove-Item -LiteralPath $probePath -Force
+              }
+            }
+            if (-not $directoryWriteDenied) {
+              throw "$Architecture host toolchain directory is writable by the release job."
+            }
+            return $resolved
+          }
+          $toolchainX64 = Resolve-HostToolchain -Path $env:FFB_TOOLCHAIN_X64_CMD `
+            -Sha256 $env:FFB_TOOLCHAIN_X64_SHA256 -Architecture 'x64'
+          $toolchainX86 = Resolve-HostToolchain -Path $env:FFB_TOOLCHAIN_X86_CMD `
+            -Sha256 $env:FFB_TOOLCHAIN_X86_SHA256 -Architecture 'x86'
+          $runtimeX64 = [IO.Directory]::GetParent(
+            [IO.Path]::GetDirectoryName($toolchainX64)).FullName
+          $runtimeX86 = [IO.Directory]::GetParent(
+            [IO.Path]::GetDirectoryName($toolchainX86)).FullName
+          if ($toolchainX64 -ieq $toolchainX86 -or $runtimeX64 -ine $runtimeX86) {
+            throw 'x64 and x86 host toolchains must be distinct snapshots in one runtime.'
+          }
+          $simHubPath = (Resolve-Path -LiteralPath $env:FFB_VALIDATED_SIMHUB_PATH `
+            -ErrorAction Stop).Path
+          if ($simHubPath -ine [IO.Path]::Combine($runtimeX64, 'Sdk')) {
+            throw 'The SimHub SDK snapshot is not bound to the toolchain runtime.'
+          }
+          $runnerTemp = (Resolve-Path -LiteralPath $env:RUNNER_TEMP -ErrorAction Stop).Path
+          $workspace = (Resolve-Path -LiteralPath $env:GITHUB_WORKSPACE -ErrorAction Stop).Path
+          $runtimePrefix = $runtimeX64.TrimEnd('\') + '\'
+          if (-not $runnerTemp.StartsWith($runtimePrefix, [StringComparison]::OrdinalIgnoreCase) -or
+              -not $workspace.StartsWith($runtimePrefix, [StringComparison]::OrdinalIgnoreCase) -or
+              $workspace.Substring($runtimeX64.Length).TrimStart('\') -notmatch
+                '^(?:runner\\)?_work\\') {
+            throw 'Runner temp/workspace is outside the toolchain disposable runtime.'
+          }
+          foreach ($boundPath in @($runtimeX64, $simHubPath, $runnerTemp, $workspace)) {
+            $current = $runtimeX64
+            $relative = $boundPath.Substring($runtimeX64.Length).TrimStart('\')
+            foreach ($segment in @($relative -split '\\' | Where-Object { $_ })) {
+              $current = Join-Path $current $segment
+              if (((Get-Item -LiteralPath $current -Force).Attributes -band
+                    [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Bound runtime path contains a reparse point: $current"
+              }
             }
           }
-          if ($stable -and $env:FFB_SIGNER_SHA256 -notmatch '^[A-F0-9]{64}$') {
-            throw 'Stable Manager build requires the pinned signer SHA-256.'
+          $vsroot = (Resolve-Path -LiteralPath $env:FFB_VISUAL_STUDIO_INSTALL_PATH `
+            -ErrorAction Stop).Path
+          if (-not (Test-Path -LiteralPath (Join-Path $vsroot 'VC\Tools\MSVC') -PathType Container)) {
+            throw 'The host-bound Visual Studio Build Tools root is invalid.'
           }
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          $vsroots = @(& $vswhere -latest `
-            -products Microsoft.VisualStudio.Product.BuildTools `
-            -version '[17.0,18.0)' `
-            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          )
-          if ($LASTEXITCODE -ne 0 -or $vsroots.Count -ne 1) {
-            throw 'Exactly one Visual Studio 2022 Build Tools installation with C++ tools is required.'
-          }
-          $vsroot = [IO.Path]::GetFullPath([string]$vsroots[0])
-          $devcmd = Join-Path $vsroot 'Common7\Tools\VsDevCmd.bat'
-          if (-not (Test-Path -LiteralPath $devcmd -PathType Leaf)) {
-            throw 'Visual Studio 2022 Build Tools developer command script was not found.'
-          }
-          "visual_studio_install_path=$vsroot" |
-            Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          $stableValue = if ($stable) { 'ON' } else { 'OFF' }
-          $signer = if ($stable) { $env:FFB_SIGNER_SHA256 } else { '' }
+          @(
+            "visual_studio_install_path=$vsroot",
+            "toolchain_x64=$toolchainX64",
+            "toolchain_x64_sha256=$($env:FFB_TOOLCHAIN_X64_SHA256)",
+            "toolchain_x86=$toolchainX86",
+            "toolchain_x86_sha256=$($env:FFB_TOOLCHAIN_X86_SHA256)",
+            "runtime_root=$runtimeX64"
+          ) | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Build channel-policy launcher, hook, manager, and tests
+        shell: pwsh
+        env:
+          FFB_TOOLCHAIN_X64_CMD: ${{ steps.build-toolchain.outputs.toolchain_x64 }}
+          FFB_TOOLCHAIN_X64_SHA256: ${{ steps.build-toolchain.outputs.toolchain_x64_sha256 }}
+          FFB_TOOLCHAIN_X86_CMD: ${{ steps.build-toolchain.outputs.toolchain_x86 }}
+          FFB_TOOLCHAIN_X86_SHA256: ${{ steps.build-toolchain.outputs.toolchain_x86_sha256 }}
+        run: |
           foreach ($architecture in @('x64', 'x86')) {
-            if ($stable) { Restore-FFBTrustedSigner }
+            $toolchain = if ($architecture -eq 'x64') {
+              $env:FFB_TOOLCHAIN_X64_CMD
+            } else { $env:FFB_TOOLCHAIN_X86_CMD }
+            $expectedHash = if ($architecture -eq 'x64') {
+              $env:FFB_TOOLCHAIN_X64_SHA256
+            } else { $env:FFB_TOOLCHAIN_X86_SHA256 }
+            if ((Get-FileHash -LiteralPath $toolchain -Algorithm SHA256).Hash -cne $expectedHash) {
+              throw "$architecture host toolchain snapshot changed before the build."
+            }
             $build = "build\$architecture-sdk"
-            $command = "call `"$devcmd`" -arch=$architecture >nul && " +
+            $command = "call `"$toolchain`" && " +
               "cmake -S . -B $build -G Ninja -DCMAKE_BUILD_TYPE=Release " +
-              "-DFFB_STABLE_PACKAGE=$stableValue -DFFB_EXPECTED_SIGNER_SHA256=$signer && " +
+              '-DFFB_STABLE_PACKAGE=OFF -DFFB_EXPECTED_SIGNER_SHA256= && ' +
               "cmake --build $build --target all && ctest --test-dir $build --output-on-failure"
             cmd.exe /d /c $command
             if ($LASTEXITCODE -ne 0) { throw "$architecture full build or test failed." }
@@ -415,37 +504,21 @@ jobs:
         shell: pwsh
         env:
           RELEASE_TAG: ${{ github.event.client_payload.tag }}
-          RELEASE_CHANNEL: ${{ github.event.client_payload.channel }}
           SIMHUB_INSTALL_PATH: ${{ steps.validated-payload.outputs.simhub_install_path }}
-          FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS: ${{ steps.trusted-controls.outputs.sign_windows_artifacts }}
-          FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS_SHA256: ${{ steps.trusted-controls.outputs.sign_windows_artifacts_sha256 }}
           FFB_VISUAL_STUDIO_INSTALL_PATH: ${{ steps.build-toolchain.outputs.visual_studio_install_path }}
+          FFB_TOOLCHAIN_X64_CMD: ${{ steps.build-toolchain.outputs.toolchain_x64 }}
+          FFB_TOOLCHAIN_X64_SHA256: ${{ steps.build-toolchain.outputs.toolchain_x64_sha256 }}
+          FFB_TOOLCHAIN_X86_CMD: ${{ steps.build-toolchain.outputs.toolchain_x86 }}
+          FFB_TOOLCHAIN_X86_SHA256: ${{ steps.build-toolchain.outputs.toolchain_x86_sha256 }}
+          FFB_RELEASE_COMMIT: ${{ steps.bind-release.outputs.commit_sha }}
         run: |
-          $stable = $env:RELEASE_CHANNEL -eq 'stable'
-          function Restore-FFBTrustedSigner {
-            if ($env:FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS_SHA256 -cnotmatch '^[A-F0-9]{64}$' -or
-                -not (Test-Path -LiteralPath $env:FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS -PathType Leaf)) {
-              throw 'Trusted signer path or SHA-256 binding is invalid.'
-            }
-            $trustedBytes = [IO.File]::ReadAllBytes($env:FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS)
-            $sha256 = [Security.Cryptography.SHA256]::Create()
-            try {
-              $trustedHash = [BitConverter]::ToString($sha256.ComputeHash($trustedBytes)).Replace('-', '')
-            }
-            finally { $sha256.Dispose() }
-            if ($trustedHash -cne $env:FFB_TRUSTED_SIGN_WINDOWS_ARTIFACTS_SHA256) {
-              throw 'Trusted signer source failed SHA-256 verification.'
-            }
-            $scriptsDirectory = (Resolve-Path -LiteralPath '.github/scripts' -ErrorAction Stop).Path
-            $tagBuildSigner = Join-Path $scriptsDirectory 'sign-windows-artifacts.ps1'
-            [IO.File]::WriteAllBytes($tagBuildSigner, $trustedBytes)
-            if ((Get-FileHash -LiteralPath $tagBuildSigner -Algorithm SHA256).Hash -cne $trustedHash) {
-              throw 'Trusted signer copy failed SHA-256 verification.'
-            }
-          }
-          if ($stable) { Restore-FFBTrustedSigner }
-          .github/scripts/package-release.ps1 -RequireSigning:$stable `
-            -VisualStudioInstallPath $env:FFB_VISUAL_STUDIO_INSTALL_PATH
+          .github/scripts/package-release.ps1 `
+            -VisualStudioInstallPath $env:FFB_VISUAL_STUDIO_INSTALL_PATH `
+            -ToolchainX64Path $env:FFB_TOOLCHAIN_X64_CMD `
+            -ToolchainX64Sha256 $env:FFB_TOOLCHAIN_X64_SHA256 `
+            -ToolchainX86Path $env:FFB_TOOLCHAIN_X86_CMD `
+            -ToolchainX86Sha256 $env:FFB_TOOLCHAIN_X86_SHA256 `
+            -ExpectedCommitSha $env:FFB_RELEASE_COMMIT
           $simhubPackageOutput = [IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP `
             ('ffb-simhub-release-' + [Guid]::NewGuid().ToString('N'))))
           $runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'
@@ -454,10 +527,9 @@ jobs:
           }
           [IO.Directory]::CreateDirectory($simhubPackageOutput) | Out-Null
           try {
-            if ($stable) { Restore-FFBTrustedSigner }
             simhub/tools/Build-SimHubPackage.ps1 `
               -SimHubInstallPath $env:SIMHUB_INSTALL_PATH `
-              -OutputDirectory $simhubPackageOutput -RequireSigning:$stable
+              -OutputDirectory $simhubPackageOutput
             $simhubArchives = @(Get-ChildItem -LiteralPath $simhubPackageOutput -File `
               -Filter 'FFBInterceptor-SimHub-*.zip')
             if ($simhubArchives.Count -ne 1) {
@@ -478,7 +550,6 @@ jobs:
               Remove-Item -LiteralPath $simhubPackageOutput -Recurse -Force
             }
           }
-          if ($stable) { Restore-FFBTrustedSigner }
           simhub/tools/Build-LauncherPackage.ps1 `
             -SimHubInstallPath $env:SIMHUB_INSTALL_PATH `
             -LauncherX64Path 'build\x64-sdk\FFBInterceptor.Launcher.exe' `
@@ -486,59 +557,286 @@ jobs:
             -LauncherX86Path 'build\x86-sdk\FFBInterceptor.Launcher.exe' `
             -HookX86Path 'build\x86-sdk\FFBInterceptor.Hook.dll' `
             -ManagerX64Path 'build\x64-sdk\FFBInterceptor.Manager.exe' `
-            -OutputDirectory release -RequireSigning:$stable
+            -OutputDirectory release
           $checksums = Get-ChildItem -LiteralPath release -File |
             Where-Object Name -ne 'SHA256SUMS' |
             Get-FileHash -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash)  $([IO.Path]::GetFileName($_.Path))" }
           [IO.File]::WriteAllLines((Join-Path (Resolve-Path release) 'SHA256SUMS'),
             $checksums, [Text.UTF8Encoding]::new($false))
-      - name: Attest complete release provenance
-        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+      - name: Verify sealed release asset set
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+        run: |
+          $version = $env:RELEASE_TAG.Substring(1)
+          $expected = @(
+            'ffb-proxy-x64.zip',
+            'ffb-proxy-x86.zip',
+            'ffb-viewer-x64.zip',
+            "ffb-interceptor-visualizer-$env:RELEASE_TAG-source.zip",
+            'sbom.cdx.json',
+            'sbom.spdx.json',
+            'python-environment.cdx.json',
+            'python-environment.spdx.json',
+            'SHA256SUMS',
+            "FFBInterceptor-SimHub-$version.zip",
+            "FFBInterceptor-Launcher-$version.zip"
+          )
+          $actual = @(Get-ChildItem -LiteralPath release -File | ForEach-Object Name | Sort-Object)
+          if ($actual.Count -ne $expected.Count -or
+              (Compare-Object ($expected | Sort-Object) $actual -CaseSensitive)) {
+            throw 'Full build did not produce the exact sealed release asset set.'
+          }
+      - name: Transfer sealed assets without release credentials
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          subject-path: release/*
-      - name: Publish verified complete release
+          name: ffb-full-release-assets
+          path: release/*
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          overwrite: false
+
+  publish:
+    name: hosted-attest-and-publish
+    needs: build
+    if: ${{ github.event_name == 'repository_dispatch' && github.ref == 'refs/heads/master' }}
+    timeout-minutes: 30
+    runs-on: windows-latest
+    environment: stable-signing
+    permissions:
+      actions: read # inspect workflow checks for the exact release commit
+      checks: read # require every protected check before publication
+      contents: write # create the immutable prerelease and upload its assets
+      id-token: write # mint the OIDC identity for build provenance
+      attestations: write # store provenance for every verified release asset
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate hosted publication contract
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          RELEASE_CHANNEL: ${{ github.event.client_payload.channel }}
+          FFB_RELEASE_COMMIT: ${{ needs.build.outputs.commit_sha }}
+          FFB_RELEASE_STATE: ${{ needs.build.outputs.release_state }}
+          FFB_EXPECTED_RELEASE_ID: ${{ needs.build.outputs.release_id }}
+          FFB_WORKFLOW_COMMIT: ${{ github.sha }}
+        run: |
+          if ($env:RELEASE_TAG -cnotmatch '^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\z' -or
+              $env:RELEASE_CHANNEL -cne 'experimental' -or
+              $env:FFB_RELEASE_COMMIT -cnotmatch '^[0-9a-f]{40}\z' -or
+              $env:FFB_RELEASE_STATE -cnotin @('absent', 'draft-recovery') -or
+              $env:FFB_EXPECTED_RELEASE_ID -cnotmatch '^\d+\z') {
+            throw 'Hosted publication received an invalid or non-experimental build contract.'
+          }
+          if (($env:FFB_RELEASE_STATE -eq 'absent') -ne
+              ([long]$env:FFB_EXPECTED_RELEASE_ID -eq 0)) {
+            throw 'Hosted publication release state and numeric ID are inconsistent.'
+          }
+          git fetch --force --no-tags origin '+refs/heads/master:refs/remotes/origin/master'
+          if ($LASTEXITCODE -ne 0) {
+            throw 'Unable to refresh origin/master from the hosted publication trust root.'
+          }
+          $tagRef = 'refs/tags/{0}' -f $env:RELEASE_TAG
+          git fetch --force --no-tags origin ('+{0}:{0}' -f $tagRef)
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to fetch the hosted publication tag $env:RELEASE_TAG."
+          }
+          $workflowCommit = $env:FFB_WORKFLOW_COMMIT.ToLowerInvariant()
+          $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $master = (git rev-parse refs/remotes/origin/master).Trim().ToLowerInvariant()
+          $tagCommit = (git rev-parse "$tagRef^{commit}").Trim().ToLowerInvariant()
+          if ($LASTEXITCODE -ne 0 -or $workflowCommit -cnotmatch '^[0-9a-f]{40}\z' -or
+              $head -cnotmatch '^[0-9a-f]{40}\z' -or
+              $master -cnotmatch '^[0-9a-f]{40}\z' -or
+              $tagCommit -cnotmatch '^[0-9a-f]{40}\z' -or
+              $workflowCommit -cne $head -or $head -cne $master -or
+              $master -cne $tagCommit -or
+              $tagCommit -cne $env:FFB_RELEASE_COMMIT) {
+            throw 'Hosted publication requires workflow commit, independently fetched master/tag, checkout, and build output to identify one exact commit.'
+          }
+      - name: Snapshot hosted publication controls
+        id: publish-controls
+        shell: pwsh
+        run: |
+          $controlRoot = Join-Path $env:RUNNER_TEMP `
+            ('ffb-hosted-publish-controls-' + [Guid]::NewGuid().ToString('N'))
+          [IO.Directory]::CreateDirectory($controlRoot) | Out-Null
+          foreach ($name in @(
+            'release-api.ps1',
+            'publish-release-assets.ps1',
+            'verify-release-ref.ps1',
+            'wait-required-checks.ps1',
+            'verify-release-package-archive.ps1'
+          )) {
+            Copy-Item -LiteralPath (Join-Path '.github/scripts' $name) -Destination $controlRoot
+          }
+          @(
+            "release_api=$(Join-Path $controlRoot 'release-api.ps1')",
+            "release_api_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'release-api.ps1') -Algorithm SHA256).Hash)",
+            "publisher=$(Join-Path $controlRoot 'publish-release-assets.ps1')",
+            "publisher_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'publish-release-assets.ps1') -Algorithm SHA256).Hash)",
+            "verify_release_ref=$(Join-Path $controlRoot 'verify-release-ref.ps1')",
+            "verify_release_ref_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'verify-release-ref.ps1') -Algorithm SHA256).Hash)",
+            "wait_required_checks=$(Join-Path $controlRoot 'wait-required-checks.ps1')",
+            "wait_required_checks_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'wait-required-checks.ps1') -Algorithm SHA256).Hash)",
+            "package_verifier=$(Join-Path $controlRoot 'verify-release-package-archive.ps1')",
+            "package_verifier_sha256=$((Get-FileHash -LiteralPath (Join-Path $controlRoot 'verify-release-package-archive.ps1') -Algorithm SHA256).Hash)"
+          ) | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Download untrusted build data
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ffb-full-release-assets
+          path: release
+      - name: Verify downloaded asset manifest without executing artifacts
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          FFB_TRUSTED_PACKAGE_VERIFIER: ${{ steps.publish-controls.outputs.package_verifier }}
+          FFB_TRUSTED_PACKAGE_VERIFIER_SHA256: ${{ steps.publish-controls.outputs.package_verifier_sha256 }}
+        run: |
+          $version = $env:RELEASE_TAG.Substring(1)
+          $expected = @(
+            'ffb-proxy-x64.zip',
+            'ffb-proxy-x86.zip',
+            'ffb-viewer-x64.zip',
+            "ffb-interceptor-visualizer-$env:RELEASE_TAG-source.zip",
+            'sbom.cdx.json',
+            'sbom.spdx.json',
+            'python-environment.cdx.json',
+            'python-environment.spdx.json',
+            'SHA256SUMS',
+            "FFBInterceptor-SimHub-$version.zip",
+            "FFBInterceptor-Launcher-$version.zip"
+          )
+          if ($env:FFB_TRUSTED_PACKAGE_VERIFIER_SHA256 -cnotmatch '^[A-F0-9]{64}\z' -or
+              -not (Test-Path -LiteralPath $env:FFB_TRUSTED_PACKAGE_VERIFIER -PathType Leaf) -or
+              (Get-FileHash -LiteralPath $env:FFB_TRUSTED_PACKAGE_VERIFIER -Algorithm SHA256).Hash `
+                -cne $env:FFB_TRUSTED_PACKAGE_VERIFIER_SHA256) {
+            throw 'Hosted release package verifier failed integrity validation.'
+          }
+          $children = @(Get-ChildItem -LiteralPath release -Force)
+          foreach ($child in $children) {
+            if ($child.PSIsContainer -or $child -isnot [IO.FileInfo] -or
+                ($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+                $child.Length -le 0) {
+              throw "Downloaded Full artifact contains a non-regular or empty child: $($child.Name)"
+            }
+          }
+          $files = @($children)
+          $actual = @($files | ForEach-Object Name | Sort-Object)
+          if ($actual.Count -ne $expected.Count -or
+              (Compare-Object ($expected | Sort-Object) $actual -CaseSensitive)) {
+            throw 'Downloaded Full artifact does not contain the exact release asset set.'
+          }
+          $expectedChecksums = [Collections.Generic.HashSet[string]]::new(
+            [StringComparer]::Ordinal)
+          foreach ($name in $expected) {
+            if ($name -ne 'SHA256SUMS') { [void]$expectedChecksums.Add($name) }
+          }
+          $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+          foreach ($line in [IO.File]::ReadAllLines((Join-Path release 'SHA256SUMS'))) {
+            if ($line -cnotmatch '^(?<hash>[A-F0-9]{64})  (?<name>[A-Za-z0-9][A-Za-z0-9._-]*)\z' -or
+                -not $expectedChecksums.Contains($Matches.name) -or
+                -not $seen.Add($Matches.name)) {
+              throw "Invalid or duplicate SHA256SUMS entry: $line"
+            }
+            if ((Get-FileHash -LiteralPath (Join-Path release $Matches.name) -Algorithm SHA256).Hash `
+                -cne $Matches.hash) {
+              throw "Release asset failed SHA-256 verification: $($Matches.name)"
+            }
+          }
+          if ($seen.Count -ne $expectedChecksums.Count) {
+            throw 'SHA256SUMS does not cover every non-manifest release asset exactly once.'
+          }
+          $launcher = Join-Path release "FFBInterceptor-Launcher-$version.zip"
+          & $env:FFB_TRUSTED_PACKAGE_VERIFIER -PackagePath $launcher -Version $version `
+            -PackageKind Launcher
+          $simHub = Join-Path release "FFBInterceptor-SimHub-$version.zip"
+          & $env:FFB_TRUSTED_PACKAGE_VERIFIER -PackagePath $simHub -Version $version `
+            -PackageKind SimHub
+      - name: Revalidate exact tag, checks, and release slot
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.event.client_payload.tag }}
-          RELEASE_CHANNEL: ${{ github.event.client_payload.channel }}
-          FFB_RELEASE_STATE: ${{ steps.release-preflight.outputs.release_state }}
-          FFB_RELEASE_COMMIT: ${{ steps.bind-release.outputs.commit_sha }}
-          FFB_EXPECTED_RELEASE_ID: ${{ steps.release-preflight.outputs.release_id }}
-          FFB_TRUSTED_RELEASE_API: ${{ steps.trusted-controls.outputs.release_api }}
-          FFB_TRUSTED_RELEASE_API_SHA256: ${{ steps.trusted-controls.outputs.release_api_sha256 }}
-          FFB_TRUSTED_PUBLISHER: ${{ steps.trusted-controls.outputs.publisher }}
-          FFB_TRUSTED_PUBLISHER_SHA256: ${{ steps.trusted-controls.outputs.publisher_sha256 }}
-          FFB_TRUSTED_VERIFY_RELEASE_REF: ${{ steps.trusted-controls.outputs.verify_release_ref }}
-          FFB_TRUSTED_VERIFY_RELEASE_REF_SHA256: ${{ steps.trusted-controls.outputs.verify_release_ref_sha256 }}
+          FFB_RELEASE_COMMIT: ${{ needs.build.outputs.commit_sha }}
+          FFB_RELEASE_STATE: ${{ needs.build.outputs.release_state }}
+          FFB_EXPECTED_RELEASE_ID: ${{ needs.build.outputs.release_id }}
+          FFB_TRUSTED_RELEASE_API: ${{ steps.publish-controls.outputs.release_api }}
+          FFB_TRUSTED_RELEASE_API_SHA256: ${{ steps.publish-controls.outputs.release_api_sha256 }}
+          FFB_TRUSTED_VERIFY_RELEASE_REF: ${{ steps.publish-controls.outputs.verify_release_ref }}
+          FFB_TRUSTED_VERIFY_RELEASE_REF_SHA256: ${{ steps.publish-controls.outputs.verify_release_ref_sha256 }}
+          FFB_TRUSTED_WAIT_REQUIRED_CHECKS: ${{ steps.publish-controls.outputs.wait_required_checks }}
+          FFB_TRUSTED_WAIT_REQUIRED_CHECKS_SHA256: ${{ steps.publish-controls.outputs.wait_required_checks_sha256 }}
+        run: |
+          foreach ($trustedFile in @(
+            @{ Path = $env:FFB_TRUSTED_RELEASE_API; Sha256 = $env:FFB_TRUSTED_RELEASE_API_SHA256 },
+            @{ Path = $env:FFB_TRUSTED_VERIFY_RELEASE_REF; Sha256 = $env:FFB_TRUSTED_VERIFY_RELEASE_REF_SHA256 },
+            @{ Path = $env:FFB_TRUSTED_WAIT_REQUIRED_CHECKS; Sha256 = $env:FFB_TRUSTED_WAIT_REQUIRED_CHECKS_SHA256 }
+          )) {
+            if ($trustedFile.Sha256 -cnotmatch '^[A-F0-9]{64}$' -or
+                (Get-FileHash -LiteralPath $trustedFile.Path -Algorithm SHA256).Hash -cne
+                  $trustedFile.Sha256) {
+              throw "Hosted publication control failed integrity verification: $($trustedFile.Path)"
+            }
+          }
+          & $env:FFB_TRUSTED_VERIFY_RELEASE_REF -RefreshRemote -RequireMasterHead `
+            -ExpectedCommitSha $env:FFB_RELEASE_COMMIT
+          & $env:FFB_TRUSTED_WAIT_REQUIRED_CHECKS `
+            -Repository $env:GITHUB_REPOSITORY -CommitSha $env:FFB_RELEASE_COMMIT
+          . $env:FFB_TRUSTED_RELEASE_API
+          $release = Get-FFBUniqueReleaseByTag -Repository $env:GITHUB_REPOSITORY -Tag $env:RELEASE_TAG
+          if ($env:FFB_RELEASE_STATE -eq 'absent') {
+            if ($release) { throw 'Release slot changed after the isolated build preflight.' }
+          }
+          else {
+            if (-not $release -or -not [bool]$release.draft -or [bool]$release.immutable -or
+                [long]$release.id -ne [long]$env:FFB_EXPECTED_RELEASE_ID) {
+              throw 'Pinned recovery draft changed after the isolated build preflight.'
+            }
+          }
+      - name: Attest complete release provenance
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-path: release/*
+      - name: Publish verified complete experimental release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.client_payload.tag }}
+          FFB_RELEASE_COMMIT: ${{ needs.build.outputs.commit_sha }}
+          FFB_EXPECTED_RELEASE_ID: ${{ needs.build.outputs.release_id }}
+          FFB_TRUSTED_RELEASE_API: ${{ steps.publish-controls.outputs.release_api }}
+          FFB_TRUSTED_RELEASE_API_SHA256: ${{ steps.publish-controls.outputs.release_api_sha256 }}
+          FFB_TRUSTED_PUBLISHER: ${{ steps.publish-controls.outputs.publisher }}
+          FFB_TRUSTED_PUBLISHER_SHA256: ${{ steps.publish-controls.outputs.publisher_sha256 }}
+          FFB_TRUSTED_VERIFY_RELEASE_REF: ${{ steps.publish-controls.outputs.verify_release_ref }}
+          FFB_TRUSTED_VERIFY_RELEASE_REF_SHA256: ${{ steps.publish-controls.outputs.verify_release_ref_sha256 }}
+          FFB_TRUSTED_WAIT_REQUIRED_CHECKS: ${{ steps.publish-controls.outputs.wait_required_checks }}
+          FFB_TRUSTED_WAIT_REQUIRED_CHECKS_SHA256: ${{ steps.publish-controls.outputs.wait_required_checks_sha256 }}
         run: |
           foreach ($trustedFile in @(
             @{ Path = $env:FFB_TRUSTED_RELEASE_API; Sha256 = $env:FFB_TRUSTED_RELEASE_API_SHA256 },
             @{ Path = $env:FFB_TRUSTED_PUBLISHER; Sha256 = $env:FFB_TRUSTED_PUBLISHER_SHA256 },
-            @{ Path = $env:FFB_TRUSTED_VERIFY_RELEASE_REF; Sha256 = $env:FFB_TRUSTED_VERIFY_RELEASE_REF_SHA256 }
+            @{ Path = $env:FFB_TRUSTED_VERIFY_RELEASE_REF; Sha256 = $env:FFB_TRUSTED_VERIFY_RELEASE_REF_SHA256 },
+            @{ Path = $env:FFB_TRUSTED_WAIT_REQUIRED_CHECKS; Sha256 = $env:FFB_TRUSTED_WAIT_REQUIRED_CHECKS_SHA256 }
           )) {
             if ($trustedFile.Sha256 -cnotmatch '^[A-F0-9]{64}$' -or
-                -not (Test-Path -LiteralPath $trustedFile.Path -PathType Leaf) -or
-                (Get-FileHash -LiteralPath $trustedFile.Path -Algorithm SHA256).Hash -cne $trustedFile.Sha256) {
-              throw "Trusted release control failed SHA-256 verification: $($trustedFile.Path)"
+                (Get-FileHash -LiteralPath $trustedFile.Path -Algorithm SHA256).Hash -cne
+                  $trustedFile.Sha256) {
+              throw "Hosted publication control failed integrity verification: $($trustedFile.Path)"
             }
           }
-          $verifyArguments = @{
-            RefreshRemote = $true
-            ExpectedCommitSha = $env:FFB_RELEASE_COMMIT
-          }
-          if ($env:FFB_RELEASE_STATE -ne 'draft-recovery') {
-            $verifyArguments.RequireMasterHead = $true
-          }
-          & $env:FFB_TRUSTED_VERIFY_RELEASE_REF @verifyArguments
-          $stable = $env:RELEASE_CHANNEL -eq 'stable'
-          $title = if ($stable) { "$env:RELEASE_TAG — 穩定版" } else { "$env:RELEASE_TAG — 實驗版" }
-          $notice = if ($stable) {
-            'SIGNED STABLE — Authenticode 已簽章，且完整套件具有 GitHub provenance attestation。'
-          } else {
-            'UNSIGNED EXPERIMENTAL — 未簽章；只代表指令遙測，不是馬達扭力。'
-          }
+          & $env:FFB_TRUSTED_VERIFY_RELEASE_REF -RefreshRemote -RequireMasterHead `
+            -ExpectedCommitSha $env:FFB_RELEASE_COMMIT
+          & $env:FFB_TRUSTED_WAIT_REQUIRED_CHECKS `
+            -Repository $env:GITHUB_REPOSITORY -CommitSha $env:FFB_RELEASE_COMMIT
           $publisherArguments = @{
             AssetsDirectory = 'release'
             Tag = $env:RELEASE_TAG
@@ -556,28 +854,10 @@ jobs:
               "FFBInterceptor-SimHub-$($env:RELEASE_TAG.Substring(1)).zip"
               "FFBInterceptor-Launcher-$($env:RELEASE_TAG.Substring(1)).zip"
             )
-            Title = $title
+            Title = "$env:RELEASE_TAG — 實驗版"
             NotesPath = '.github/release-notes.md'
-            ChannelNotice = $notice
-            Prerelease = (-not $stable)
+            ChannelNotice = 'UNSIGNED EXPERIMENTAL — 未簽章；只代表指令遙測，不是馬達扭力。'
+            Prerelease = $true
           }
           $publisherArguments.ExpectedReleaseId = [long]$env:FFB_EXPECTED_RELEASE_ID
           & $env:FFB_TRUSTED_PUBLISHER @publisherArguments
-      - name: Remove signing identity imported by this run
-        if: ${{ always() && github.event.client_payload.channel == 'stable' }}
-        shell: pwsh
-        run: |
-          $thumbprints = @($env:FFB_SIGNING_CERT_THUMBPRINTS -split ',' |
-            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-          $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-          foreach ($thumbprint in $thumbprints) {
-            if ($thumbprint -cnotmatch '^[A-F0-9]{40}\z' -or -not $seen.Add($thumbprint)) {
-              throw 'Refusing ambiguous signing-certificate cleanup state.'
-            }
-          }
-          foreach ($thumbprint in $thumbprints) {
-            $certificatePath = "Cert:\CurrentUser\My\$thumbprint"
-            if (Test-Path -LiteralPath $certificatePath) {
-              Remove-Item -LiteralPath $certificatePath -DeleteKey -Force
-            }
-          }

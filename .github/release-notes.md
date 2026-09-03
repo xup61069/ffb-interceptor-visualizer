@@ -10,7 +10,8 @@
 
 若本 Release 附有 `FFBInterceptor-Launcher-{{VERSION}}.zip`：
 
-1. 驗證下方 SHA-256／attestation 或 Stable Authenticode 後，完整解壓縮。
+1. 驗證下方 SHA-256 與 provenance attestation 後，完整解壓縮；V1 公開 Release 只有
+   未簽章 Experimental。
 2. 正常雙擊 `FFBInterceptor.Manager.exe`。
 3. 第一次選遊戲 EXE 與 SimHub 路徑、按「安裝／更新插件」，在 SimHub 啟用
    **FFB Interceptor**。
@@ -33,7 +34,7 @@ Launcher 套件完全不含、也不會在遊戲資料夾放置或修改 `dinput
   helper 前，以自包含 bootstrap 鎖定全包檔案並核對 exact manifest、SHA-256、reparse
   point 與 Authenticode 狀態；一般使用者預設導向 Manager，`-NoElevation` 只供不需
   管理員權限的受控測試目錄。
-- Stable Manager 採 Authenticode fail-closed：執行中 Manager 與 manifest 內全部
+- 尚未啟用於公開發行的 Stable Manager 政策採 Authenticode fail-closed：執行中 Manager 與 manifest 內全部
   `.exe`、`.dll`、`.ps1`、`.psm1` 都要驗證；目前 allowlist 合計 11 個簽章 payload。
   它們必須全數通過 Windows 信任鏈及撤銷檢查、同 signer，並符合編譯時釘選的
   certificate SHA-256。封裝器另解析 raw PE，要求唯一、NUL 結尾且已釘選 signer 的
@@ -44,7 +45,8 @@ Launcher 套件完全不含、也不會在遊戲資料夾放置或修改 `dinput
 - Proxy、Hook、Launcher 與 Manager 使用靜態 MSVC CRT，並以
   `/DEPENDENTLOADFLAG:0x800` 將 PE 靜態匯入的 DLL 搜尋限制到 System32；這不涵蓋任意
   動態載入。
-- 兩條公開流程的 Experimental 都固定未簽章，而且完全不讀 Stable 簽章 secrets；仍
+- V1 兩條公開流程都固定為 Experimental；Full 收到 `stable` 會 fail-closed，而且兩條流程
+  都完全不讀 Stable 簽章 secrets。Experimental 仍
   強制內層 SHA-256 manifest，並要求使用者從官方 Release 外部驗證 GitHub provenance
   attestation。Attestation 不是 Authenticode。
 - 削峰模型改為 `ConservativeAbsoluteSumPerDevice`：同來源的 active Constant／Ramp／
@@ -74,6 +76,19 @@ Launcher 套件完全不含、也不會在遊戲資料夾放置或修改 `dinput
 - 發行 workflow 只從預設分支 `master` 接受 `repository_dispatch`，並精確驗證 event
   type 與 `client_payload`；push tag 本身不會自動發布。GitHub 已啟用 immutable releases，
   tag ruleset `21893944` 會禁止更新或刪除 `refs/tags/v*`。
+- Full 即使恢復 private mutable draft，也要求 `github.sha`、checkout、當下
+  `origin/master`、tag commit 與 build output 是同一 SHA；只有 Base Experimental 的草稿
+  恢復可使用仍在 master 歷史中的 ancestor。
+- Full 的 Low IL AppContainer self-hosted job 只有 `actions: read`、`checks: read`、
+  `contents: read`，只建置並以 Actions artifact 移交精確 11 個資產。獨立
+  `windows-latest` job 才有 `contents: write`、`id-token: write`、`attestations: write`，
+  綁定 `stable-signing` environment 人工核准，只驗證下載資料、不執行建置產物。SimHub／
+  Launcher ZIP 會再做 exact entry、路徑／型別、內層 SHA-256 與禁止 proprietary SDK／
+  `dinput8.dll` 的純靜態檢查，最後才產生 provenance 並發布為 prerelease Experimental。
+- Attestation 只記錄 publisher 收到與送出的 exact bytes；它不證明 self-hosted builder
+  乾淨，也未把允許檔名下的 scripts、文件、Dashboard 或 PE 內容逐一與 trusted checkout
+  比對。遭入侵 builder 仍可能產生 manifest 自洽但內容惡意的資產；此殘餘風險只限本版
+  未簽章 Experimental，不能作為未來 Stable 的信任模型。
 
 ## 資產
 
@@ -89,8 +104,8 @@ Launcher 套件完全不含、也不會在遊戲資料夾放置或修改 `dinput
 - `python-environment.spdx.json`
 - `SHA256SUMS`
 
-只有在 `[self-hosted, Windows, X64, simhub-sdk, ephemeral]` 完整 workflow 驗過真實
-SDK 後，才會另外有：
+只有在 `[self-hosted, Windows, X64, simhub-sdk, ephemeral, ffb-release]` 的 read-only
+AppContainer 建置 job 驗過真實 SDK 後，才會另外有：
 
 - `FFBInterceptor-SimHub-{{VERSION}}.zip`
 - `FFBInterceptor-Launcher-{{VERSION}}.zip`（一般使用首選）
@@ -102,15 +117,19 @@ SimHub build 的兩個 standalone `.simhubdash` 只存在於隔離暫存目錄�
 不要因為檔名列在說明中，就假設頁面一定已附上完整套件。只有資產清單真的出現上述
 兩個 ZIP，才表示完整 workflow 曾在 labels 相符的 runner 上完成；`ephemeral` label
 本身不是主機退役或清理證明，仍須以維護者保留的註冊、退役與清理紀錄確認。
-`stable-signing`
-environment 已限制只允許 `master`，reviewer 為 `xup61069`；但 Stable 另需公信
-code-signing PFX、釘選 signer 與成功簽章。沒有有效 Authenticode 的 Full 資產仍是
-Experimental；也不能用這份說明假裝已完成實體硬體／商業遊戲測試。
+`stable-signing` environment 已限制只允許 `master`，reviewer 為 `xup61069`；V1 只把它
+當作 hosted 發布 job 的人工核准邊界，該 job 不讀簽章 secrets。公開 Stable 尚未啟用；
+未來必須另有不執行未信任建置程式的獨立簽章 job、公信 code-signing 憑證與實體測試。
+目前 Full 資產一律是 Experimental，也不能用這份說明假裝已完成實體硬體／商業遊戲測試。
 
-若本版由持續使用的 Windows 主機建置，則使用的是專用非管理員帳號中的 GitHub
-`--ephemeral` 單次 runner；工作後會驗證 GitHub 退役並清除專用 runner／work 目錄。
-這是邏輯清理，不等同一次性 VM 或磁碟安全抹除。GitHub provenance 能連結資產、workflow
-與 commit，但不能證明主機來自全新映像或排除主機層污染；因此這類資產只會標示為未簽章
+若本版由持續使用的 Windows 主機建置，則使用 Low IL AppContainer 內、只有 read 權的 GitHub
+`--ephemeral` 單次 runner；runner runtime 採唯一、受保護的 C: 目錄，SimHub SDK 與
+x64／x86 toolchain 環境快照為 job 不可寫，並在工作前以 native probe 驗證主機 gh token、
+Credential Manager、SSH agent、使用者憑證與私人檔案無法從容器讀取。工作後會驗證 GitHub
+退役並清除 AppContainer profile、runner／work 目錄。
+這是邏輯清理，不等同一次性 VM 或磁碟安全抹除。GitHub provenance 證明 hosted publisher
+收到並驗證後送出的 exact bytes 與 workflow／commit 身分，但不能證明 self-hosted 主機來自
+全新映像、所有二進位可重現，或排除主機層污染；因此這類資產只會標示為未簽章
 Experimental，不能視為 Stable 或 Authenticode 供應鏈保證。
 
 ## 驗證
@@ -122,8 +141,8 @@ Experimental，不能視為 Stable 或 Authenticode 供應鏈保證。
    gh attestation verify <下載檔> --repo xup61069/ffb-interceptor-visualizer
    ```
 
-3. Stable 再以 Windows 檔案內容或 `Get-AuthenticodeSignature` 確認簽章；若沒有有效
-   Authenticode，就不能把資產當成 Stable。
+3. 本版是未簽章 Experimental，不能當成 Stable。未來若另行啟用 Stable，仍須以 Windows
+   檔案內容或 `Get-AuthenticodeSignature` 確認有效 Authenticode。
 4. Launcher ZIP 解壓後不要修改 `SHA256SUMS.txt` 或拆開搬移檔案；Manager 會拒絕
    缺漏、額外或遭修改的內容。
 

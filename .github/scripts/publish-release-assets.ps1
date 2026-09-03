@@ -21,10 +21,12 @@ if ($ExpectedReleaseId -lt 0) { throw 'ExpectedReleaseId cannot be negative.' }
 . (Join-Path $PSScriptRoot 'release-api.ps1')
 $assetsRoot = (Resolve-Path -LiteralPath $AssetsDirectory -ErrorAction Stop).Path
 $notesTemplate = Get-Content -Raw -LiteralPath $NotesPath -Encoding UTF8
-$assets = @(Get-ChildItem -LiteralPath $assetsRoot -File | Sort-Object Name)
+$assets = @(Get-ChildItem -LiteralPath $assetsRoot -Force | Sort-Object Name)
 if ($assets.Count -eq 0 -or $assets.Count -gt 64) { throw 'Release must contain between 1 and 64 assets.' }
 foreach ($asset in $assets) {
-    if ($asset.Name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\z' -or $asset.Length -le 0) {
+    if ($asset.PSIsContainer -or $asset -isnot [IO.FileInfo] -or
+        ($asset.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        $asset.Name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*\z' -or $asset.Length -le 0) {
         throw "Unsafe or empty release asset: $($asset.Name)"
     }
 }
