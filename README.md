@@ -174,7 +174,8 @@ CycloneDX 與 SPDX 格式。
 
 完整 self-hosted 發行才會另外加入 `FFBInterceptor-SimHub-1.0.0.zip` 與首選的
 `FFBInterceptor-Launcher-1.0.0.zip`，runner labels 必須完整符合
-`[self-hosted, Windows, X64, simhub-sdk, ephemeral]`。資產一旦同名上傳就不可由發行
+`[self-hosted, Windows, X64, simhub-sdk, ephemeral, ffb-release]`；不含 secrets 的預檢則用
+獨立 `ffb-preflight` label，避免兩類工作互搶。資產一旦同名上傳就不可由發行
 腳本覆寫。
 
 截至 2026-09-03，GitHub 已啟用 immutable releases；tag ruleset `21893944` 會保護

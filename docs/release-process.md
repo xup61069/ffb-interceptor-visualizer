@@ -166,12 +166,29 @@ dependency graph，以及 SimHub SDK build-time-only exact fingerprint 產生；
 
 工作流程：`.github/workflows/simhub-sdk-release.yml`（顯示名稱 `Full SimHub release`）
 
-正式建立不可移動的 tag 前，先以 `.github/workflows/simhub-runner-preflight.yml` 對同一組
-runner labels 跑一次不含 secrets、只有 `contents: read` 的完整本機建置／封裝預檢。
+正式建立不可移動的 tag 前，先以 `.github/workflows/simhub-runner-preflight.yml` 對專用的
+`[self-hosted, Windows, X64, simhub-sdk, ephemeral, ffb-preflight]` labels 跑一次不含 secrets、
+只有 `contents: read` 的完整本機建置／封裝預檢。
 payload 只接受預期的 master 40 位 commit SHA 與隔離 SimHub SDK 路徑；預檢會驗證
 master 綁定、SDK 指紋、uv-managed Python、x86／x64 全部測試，以及 SimHub／Launcher
 套件，但不建立 tag、attestation 或 Release。預檢 runner 完成一個 job 後必須退役；
 正式發布另用全新 profile 與全新 `--ephemeral` runner，不能重用預檢工作目錄。
+
+預檢 dispatch 的 payload 必須剛好包含凍結的 master SHA 與私有 SDK snapshot：
+
+```powershell
+@{
+  event_type = 'ffb-full-runner-preflight'
+  client_payload = @{
+    commit = '<40 位小寫 master SHA>'
+    simhub_path = '<隔離 profile 內的 SimHub SDK snapshot 絕對路徑>'
+  }
+} | ConvertTo-Json -Depth 3 | gh api --method POST `
+  repos/xup61069/ffb-interceptor-visualizer/dispatches --input -
+```
+
+預檢通過後必須凍結 master；推 tag 前再次確認 `origin/master` 仍等於預檢 SHA。正式發行
+runner 另加 `ffb-release` label，不能帶 `ffb-preflight`，避免兩種 queued job 互搶。
 
 只接受 `repository_dispatch` 事件 `ffb-full-release`。payload 必須剛好包含：
 
@@ -196,7 +213,7 @@ PowerShell 範例：
 job 綁定 `stable-signing` environment，且只會排到精確 labels：
 
 ```yaml
-runs-on: [self-hosted, Windows, X64, simhub-sdk, ephemeral]
+runs-on: [self-hosted, Windows, X64, simhub-sdk, ephemeral, ffb-release]
 ```
 
 流程依序：
