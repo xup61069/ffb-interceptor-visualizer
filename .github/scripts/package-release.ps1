@@ -166,9 +166,10 @@ function Resolve-ToolchainSnapshot {
         if ($line.IndexOfAny([char[]]'%!^&|<>') -ge 0 -or
             $line -cnotmatch '^set "(?<name>[A-Za-z_][A-Za-z0-9_()]*)=(?<value>[^"\r\n]*)"\z' -or
             $allowedNames -notcontains $Matches.name -or
-            -not $values.TryAdd($Matches.name, $Matches.value)) {
+            $values.ContainsKey($Matches.name)) {
             throw "$Architecture toolchain snapshot contains an unsafe or duplicate command."
         }
+        $values.Add($Matches.name, $Matches.value)
     }
     foreach ($requiredName in @(
         'PATH', 'INCLUDE', 'LIB', 'LIBPATH', 'VCINSTALLDIR', 'VCToolsInstallDir',
@@ -236,12 +237,16 @@ if ($useSnapshots) {
     if ($actualSimHubPath -ine $expectedSimHubPath) {
         throw 'The SimHub SDK snapshot is not bound to the toolchain disposable runtime.'
     }
-    $runnerTemp = (Resolve-Path -LiteralPath $env:RUNNER_TEMP -ErrorAction Stop).Path.TrimEnd('\')
-    $runtimePrefix = $runtimeX64.TrimEnd('\') + '\'
-    if (-not $runnerTemp.StartsWith($runtimePrefix, [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'RUNNER_TEMP is outside the toolchain disposable runtime.'
+    if ([string]::IsNullOrWhiteSpace($env:GITHUB_WORKSPACE)) {
+        throw 'GITHUB_WORKSPACE is required with isolated toolchain snapshots.'
     }
-    foreach ($boundPath in @($expectedSimHubPath, $runnerTemp)) {
+    $runnerBinding = & (Join-Path $PSScriptRoot 'assert-mapped-runner-paths.ps1') `
+        -PhysicalRuntimeRoot $runtimeX64 `
+        -RunnerTemp $env:RUNNER_TEMP `
+        -RunnerToolCache $env:RUNNER_TOOL_CACHE `
+        -Workspace $env:GITHUB_WORKSPACE `
+        -RepositorySlug $env:GITHUB_REPOSITORY
+    foreach ($boundPath in @($expectedSimHubPath)) {
         $current = $runtimeX64
         $relative = $boundPath.Substring($runtimeX64.Length).TrimStart('\')
         foreach ($segment in @($relative -split '\\' | Where-Object { $_ })) {

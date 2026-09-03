@@ -95,6 +95,8 @@ $fullWorkflow = Get-Content -Raw -LiteralPath (Join-Path $root '.github\workflow
 $runnerPreflightWorkflow = Get-Content -Raw -LiteralPath (
     Join-Path $root '.github\workflows\simhub-runner-preflight.yml')
 $packageRelease = Get-Content -Raw -LiteralPath (Join-Path $root '.github\scripts\package-release.ps1')
+$mappedRunnerPathGatePath = Join-Path $root '.github\scripts\assert-mapped-runner-paths.ps1'
+$mappedRunnerPathGate = Get-Content -Raw -LiteralPath $mappedRunnerPathGatePath
 $launcherArchiveVerifierPath = Join-Path $root '.github\scripts\verify-release-package-archive.ps1'
 $launcherArchiveVerifier = Get-Content -Raw -LiteralPath $launcherArchiveVerifierPath
 $releasePublisher = Get-Content -Raw -LiteralPath (
@@ -285,6 +287,11 @@ foreach ($requiredFullOperationFragment in @(
     "python-version: '3.13.15'",
     'cache-local-path: ''${{ runner.temp }}\uv-cache''',
     '- name: Install isolated uv-managed Python',
+    'UV_CACHE_DIR = [IO.Path]::Combine($runnerTemp, ''uv-cache'')',
+    'UV_TOOL_DIR = [IO.Path]::Combine($runnerTemp, ''uv-tool-dir'')',
+    'UV_TOOL_BIN_DIR = [IO.Path]::Combine($runnerTemp, ''uv-tool-bin-dir'')',
+    '$name was not exported by the pinned setup-uv action.',
+    '$name is not the exact mapped runner-temp path.',
     'UV_PYTHON_INSTALL_DIR',
     'uv python install 3.13.15',
     'uv python find 3.13.15 --managed-python',
@@ -300,7 +307,12 @@ foreach ($requiredFullOperationFragment in @(
     'host toolchain snapshot has the wrong architecture',
     'x64 and x86 host toolchains must be distinct snapshots in one runtime',
     'The SimHub SDK snapshot is not bound to the toolchain runtime',
-    'Runner temp/workspace is outside the toolchain disposable runtime',
+    '- name: Validate mapped runner binding before local execution',
+    'Mapped runner path gate failed its canonical SHA-256 pin',
+    'assert-mapped-runner-paths.ps1',
+    '-RunnerToolCache $env:RUNNER_TOOL_CACHE',
+    '-RepositorySlug $env:GITHUB_REPOSITORY',
+    'runner_mapped_root=$($runnerBinding.MappedRoot)',
     'runtime_root=$runtimeX64',
     '"visual_studio_install_path=$vsroot"',
     'FFB_VISUAL_STUDIO_INSTALL_PATH: ${{ steps.build-toolchain.outputs.visual_studio_install_path }}',
@@ -354,6 +366,11 @@ foreach ($requiredRunnerPreflightFragment in @(
     '$head -cne $commit -or $master -cne $commit',
     "python-version: '3.13.15'",
     'cache-local-path: ''${{ runner.temp }}\uv-cache''',
+    'UV_CACHE_DIR = [IO.Path]::Combine($runnerTemp, ''uv-cache'')',
+    'UV_TOOL_DIR = [IO.Path]::Combine($runnerTemp, ''uv-tool-dir'')',
+    'UV_TOOL_BIN_DIR = [IO.Path]::Combine($runnerTemp, ''uv-tool-bin-dir'')',
+    '$name was not exported by the pinned setup-uv action.',
+    '$name is not the exact mapped runner-temp path.',
     'uv python install 3.13.15',
     'uv python find 3.13.15 --managed-python',
     'Resolve-HostToolchain',
@@ -367,7 +384,12 @@ foreach ($requiredRunnerPreflightFragment in @(
     'host toolchain snapshot has the wrong architecture',
     'x64 and x86 host toolchains must be distinct snapshots in one runtime',
     'The SimHub SDK snapshot is not bound to the toolchain runtime',
-    'Runner temp/workspace is outside the toolchain disposable runtime',
+    '- name: Validate mapped runner binding before local execution',
+    'Mapped runner path gate failed its canonical SHA-256 pin',
+    'assert-mapped-runner-paths.ps1',
+    '-RunnerToolCache $env:RUNNER_TOOL_CACHE',
+    '-RepositorySlug $env:GITHUB_REPOSITORY',
+    'runner_mapped_root=$($runnerBinding.MappedRoot)',
     'runtime_root=$runtimeX64',
     '.github/scripts/package-release.ps1',
     '-ExpectedCommitSha $env:FFB_EXPECTED_COMMIT',
@@ -400,7 +422,10 @@ foreach ($requiredPackageToolchainFragment in @(
     'toolchain snapshot directory is writable by the release job.',
     'x64 and x86 toolchain snapshots must be distinct files in one disposable runtime.',
     'The SimHub SDK snapshot is not bound to the toolchain disposable runtime.',
-    'RUNNER_TEMP is outside the toolchain disposable runtime.',
+    'GITHUB_WORKSPACE is required with isolated toolchain snapshots.',
+    'assert-mapped-runner-paths.ps1',
+    '-RunnerToolCache $env:RUNNER_TOOL_CACHE',
+    '-RepositorySlug $env:GITHUB_REPOSITORY',
     'Bound disposable runtime path contains a reparse point:',
     '[string]$ReleaseTag = $env:RELEASE_TAG',
     '[string]$ExpectedCommitSha = ''''',
@@ -425,6 +450,248 @@ foreach ($requiredPackageToolchainFragment in @(
         throw "Base/Full package script is missing its Visual Studio 2022 selection contract: $requiredPackageToolchainFragment"
     }
 }
+
+$mappedGateTokens = $null
+$mappedGateErrors = $null
+[Management.Automation.Language.Parser]::ParseFile(
+    $mappedRunnerPathGatePath, [ref]$mappedGateTokens, [ref]$mappedGateErrors) | Out-Null
+if ($mappedGateErrors.Count) { throw $mappedGateErrors[0] }
+foreach ($requiredMappedGateFragment in @(
+    'RUNNER_TEMP must be exactly <D-Z>:\_work\_temp.',
+    'RUNNER_TOOL_CACHE must be exactly on the state-bound mapped drive.',
+    'GITHUB_WORKSPACE must be exactly <drive>:\_work\<repository>\<repository>.',
+    'Physical runtime root is outside the bound disposable runtime pattern.',
+    'physical counterpart escaped the disposable runtime.',
+    'contains a reparse point:',
+    '[Ffb.ReleaseGate.DirectoryIdentity]::Same',
+    'VolumeSerialNumber',
+    'FileIndexHigh',
+    'FileIndexLow'
+)) {
+    if ($mappedRunnerPathGate.IndexOf($requiredMappedGateFragment,
+            [StringComparison]::Ordinal) -lt 0) {
+        throw "Mapped runner path gate is missing fail-closed fragment: $requiredMappedGateFragment"
+    }
+}
+
+function Get-CanonicalUtf8Sha256([string]$Path) {
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and
+        $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        throw 'Canonical fixture must not contain a UTF-8 BOM.'
+    }
+    $text = [Text.UTF8Encoding]::new($false, $true).GetString($bytes)
+    if ([regex]::IsMatch($text, '\r(?!\n)')) {
+        throw 'Canonical fixture contains a lone carriage return.'
+    }
+    $canonical = [Text.UTF8Encoding]::new($false).GetBytes($text.Replace("`r`n", "`n"))
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($sha.ComputeHash($canonical)).Replace('-', '') }
+    finally { $sha.Dispose() }
+}
+
+$mappedGateHash = Get-CanonicalUtf8Sha256 $mappedRunnerPathGatePath
+foreach ($workflow in @($fullWorkflow, $runnerPreflightWorkflow)) {
+    $pins = @([regex]::Matches($workflow,
+        '\$gateHash -cne ''(?<sha>[A-F0-9]{64})''') | ForEach-Object {
+            $_.Groups['sha'].Value
+        })
+    if ($pins.Count -ne 2 -or @($pins | Where-Object { $_ -cne $mappedGateHash }).Count) {
+        throw 'Mapped runner path gate canonical hash pins are stale or inconsistent.'
+    }
+    $checkout = $workflow.IndexOf('uses: actions/checkout@', [StringComparison]::Ordinal)
+    $earlyGate = $workflow.IndexOf('- name: Validate mapped runner binding before local execution',
+        [StringComparison]::Ordinal)
+    $payloadGate = $workflow.IndexOf('- name: Validate ', $earlyGate + 1,
+        [StringComparison]::Ordinal)
+    if ($checkout -lt 0 -or $earlyGate -le $checkout -or $payloadGate -le $earlyGate) {
+        throw 'Mapped runner path gate must be the first local step after checkout.'
+    }
+}
+
+# Exercise the mapped/physical path gate against a real disposable DOS-drive alias.
+$mappedFixtureId = 'a' + [Guid]::NewGuid().ToString('N').Substring(1)
+$mappedOtherId = 'b' + [Guid]::NewGuid().ToString('N').Substring(1)
+$mappedFixtureRoot = "C:\ffb-v1-$mappedFixtureId"
+$mappedOtherRoot = "C:\ffb-v1-$mappedOtherId"
+$mappedDrive = ''
+$mappedDriveTarget = '\??\' + $mappedFixtureRoot
+$mappedJunction = ''
+$existingDrives = @([Environment]::GetLogicalDrives() | ForEach-Object {
+    $_.Substring(0, 2).ToUpperInvariant()
+})
+if (-not ('Ffb.Tests.DosDeviceLease' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
+namespace Ffb.Tests {
+    public static class DosDeviceLease {
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern uint QueryDosDeviceW(string device, char[] target, int length);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DefineDosDeviceW(uint flags, string device, string target);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint GetLogicalDrives();
+
+        public static string[] Targets(string drive) {
+            char[] buffer = new char[32768];
+            uint count = QueryDosDeviceW(drive, buffer, buffer.Length);
+            if (count == 0) {
+                int error = Marshal.GetLastWin32Error();
+                if (error == 2) return new string[0];
+                throw new Win32Exception(error);
+            }
+            var values = new List<string>();
+            int offset = 0;
+            while (offset < count && buffer[offset] != '\0') {
+                int end = offset;
+                while (end < count && buffer[end] != '\0') end++;
+                values.Add(new string(buffer, offset, end - offset));
+                offset = end + 1;
+            }
+            return values.ToArray();
+        }
+
+        public static bool LogicalPresent(string drive) {
+            uint mask = GetLogicalDrives();
+            if (mask == 0) throw new Win32Exception(Marshal.GetLastWin32Error());
+            int index = Char.ToUpperInvariant(drive[0]) - 'A';
+            return (mask & (1u << index)) != 0;
+        }
+
+        public static bool Map(string drive, string target) {
+            return DefineDosDeviceW(0x1u | 0x8u, drive, target);
+        }
+
+        public static bool UnmapExact(string drive, string target) {
+            return DefineDosDeviceW(0x1u | 0x2u | 0x4u | 0x8u, drive, target);
+        }
+    }
+}
+'@
+}
+try {
+    foreach ($directory in @(
+        "$mappedFixtureRoot\_work\_temp",
+        "$mappedFixtureRoot\_work\repository\repository",
+        "$mappedFixtureRoot\_work-other\_temp",
+        "$mappedFixtureRoot\ToolCache",
+        "$mappedFixtureRoot\ToolCacheOther",
+        "$mappedFixtureRoot\ReparseTarget",
+        "$mappedOtherRoot\_work\_temp",
+        "$mappedOtherRoot\_work\repository\repository",
+        "$mappedOtherRoot\ToolCache"
+    )) { [IO.Directory]::CreateDirectory($directory) | Out-Null }
+
+    foreach ($letter in [char[]]'EFHIJKLMNOPQRSTUVWX') {
+        $candidate = "$letter`:"
+        if ($candidate -cin $existingDrives -or
+            [Ffb.Tests.DosDeviceLease]::Targets($candidate).Count -ne 0 -or
+            [Ffb.Tests.DosDeviceLease]::LogicalPresent($candidate)) { continue }
+        if ([Ffb.Tests.DosDeviceLease]::Map($candidate, $mappedDriveTarget)) {
+            $targets = @([Ffb.Tests.DosDeviceLease]::Targets($candidate))
+            if ($targets.Count -eq 1 -and $targets[0] -ceq $mappedDriveTarget -and
+                [Ffb.Tests.DosDeviceLease]::LogicalPresent($candidate)) {
+                $mappedDrive = $candidate
+                break
+            }
+            [Ffb.Tests.DosDeviceLease]::UnmapExact($candidate, $mappedDriveTarget) | Out-Null
+        }
+    }
+    if (-not $mappedDrive) { throw 'No disposable drive letter was available for mapped-runner tests.' }
+
+    $mappedTemp = "$mappedDrive\_work\_temp"
+    $mappedToolCache = "$mappedDrive\ToolCache"
+    $mappedWorkspace = "$mappedDrive\_work\repository\repository"
+    & $mappedRunnerPathGatePath -PhysicalRuntimeRoot $mappedFixtureRoot `
+        -RunnerTemp $mappedTemp -RunnerToolCache $mappedToolCache `
+        -Workspace $mappedWorkspace -RepositorySlug 'owner/repository' | Out-Null
+
+    function Assert-MappedRunnerPathRejected(
+        [string]$PhysicalRoot, [string]$Temp, [string]$ToolCache,
+        [string]$Workspace, [string]$Repository = 'owner/repository') {
+        $rejected = $false
+        try {
+            & $mappedRunnerPathGatePath -PhysicalRuntimeRoot $PhysicalRoot `
+                -RunnerTemp $Temp -RunnerToolCache $ToolCache `
+                -Workspace $Workspace -RepositorySlug $Repository | Out-Null
+        } catch { $rejected = $true }
+        if (-not $rejected) { throw 'Mapped runner path negative fixture was accepted.' }
+    }
+
+    $wrongDrive = @([char[]]'EFHIJKLMNOPQRSTUVWX' | ForEach-Object { "$_`:" } |
+        Where-Object { $_ -cne $mappedDrive -and $_ -cnotin $existingDrives } |
+        Select-Object -First 1)[0]
+    Assert-MappedRunnerPathRejected $mappedFixtureRoot "$wrongDrive\_work\_temp" `
+        $mappedToolCache $mappedWorkspace
+    Assert-MappedRunnerPathRejected $mappedFixtureRoot "$mappedDrive`_work\_temp" `
+        $mappedToolCache $mappedWorkspace
+    Assert-MappedRunnerPathRejected $mappedFixtureRoot "$mappedDrive\_work-other\_temp" `
+        $mappedToolCache $mappedWorkspace
+    Assert-MappedRunnerPathRejected $mappedFixtureRoot.ToUpperInvariant() $mappedTemp `
+        $mappedToolCache $mappedWorkspace
+    Assert-MappedRunnerPathRejected $mappedOtherRoot $mappedTemp `
+        $mappedToolCache $mappedWorkspace
+    Assert-MappedRunnerPathRejected $mappedFixtureRoot "$mappedTemp\" `
+        $mappedToolCache $mappedWorkspace
+    Assert-MappedRunnerPathRejected $mappedFixtureRoot "$mappedDrive\_work\.\_temp" `
+        $mappedToolCache $mappedWorkspace
+    Assert-MappedRunnerPathRejected $mappedFixtureRoot "$mappedTemp`:stream" `
+        $mappedToolCache $mappedWorkspace
+    Assert-MappedRunnerPathRejected $mappedFixtureRoot $mappedFixtureRoot `
+        $mappedToolCache $mappedWorkspace
+    Assert-MappedRunnerPathRejected $mappedFixtureRoot $mappedTemp `
+        "$mappedDrive\ToolCacheOther" $mappedWorkspace
+    Assert-MappedRunnerPathRejected $mappedFixtureRoot $mappedTemp `
+        $mappedToolCache $mappedWorkspace 'owner/other'
+
+    $mappedJunction = "$mappedFixtureRoot\_work\repository\repository"
+    [IO.Directory]::Delete($mappedJunction, $false)
+    New-Item -ItemType Junction -Path $mappedJunction `
+        -Target "$mappedFixtureRoot\ReparseTarget" | Out-Null
+    Assert-MappedRunnerPathRejected $mappedFixtureRoot $mappedTemp `
+        $mappedToolCache $mappedWorkspace
+}
+finally {
+    if ($mappedJunction -and (Test-Path -LiteralPath $mappedJunction)) {
+        $attributes = [IO.File]::GetAttributes($mappedJunction)
+        if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            [IO.Directory]::Delete($mappedJunction, $false)
+        }
+    }
+    if ($mappedDrive) {
+        $beforeCleanup = @([Ffb.Tests.DosDeviceLease]::Targets($mappedDrive))
+        if ($mappedDriveTarget -cin $beforeCleanup -and
+            -not [Ffb.Tests.DosDeviceLease]::UnmapExact($mappedDrive, $mappedDriveTarget)) {
+            throw 'Disposable mapped-runner test drive exact removal failed.'
+        }
+        $afterCleanup = @([Ffb.Tests.DosDeviceLease]::Targets($mappedDrive))
+        if ($mappedDriveTarget -cin $afterCleanup -or
+            ($afterCleanup.Count -eq 0 -and
+                [Ffb.Tests.DosDeviceLease]::LogicalPresent($mappedDrive))) {
+            throw 'Disposable mapped-runner test drive cleanup failed.'
+        }
+    }
+    foreach ($fixtureRoot in @($mappedFixtureRoot, $mappedOtherRoot)) {
+        $canonicalFixture = [IO.Path]::GetFullPath($fixtureRoot)
+        if ($canonicalFixture -cne $fixtureRoot -or
+            $canonicalFixture -cnotmatch '^C:\\ffb-v1-[0-9a-f]{32}$') {
+            throw 'Refusing unsafe mapped-runner fixture cleanup.'
+        }
+        if (Test-Path -LiteralPath $canonicalFixture) {
+            if (([IO.File]::GetAttributes($canonicalFixture) -band
+                [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw 'Mapped-runner fixture root became a reparse point.'
+            }
+            [IO.Directory]::Delete($canonicalFixture, $true)
+        }
+    }
+}
+
 try {
     & (Join-Path $root '.github\scripts\package-release.ps1') -ReleaseTag '..\escape'
     throw 'Package script accepted an unsafe ReleaseTag.'

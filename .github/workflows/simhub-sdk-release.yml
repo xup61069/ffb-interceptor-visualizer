@@ -35,6 +35,40 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Validate mapped runner binding before local execution
+        shell: pwsh
+        run: |
+          $pathGate = (Resolve-Path -LiteralPath '.github/scripts/assert-mapped-runner-paths.ps1' -ErrorAction Stop).Path
+          $gateBytes = [IO.File]::ReadAllBytes($pathGate)
+          if ($gateBytes.Length -ge 3 -and $gateBytes[0] -eq 0xEF -and
+              $gateBytes[1] -eq 0xBB -and $gateBytes[2] -eq 0xBF) {
+            throw 'Mapped runner path gate must not contain a UTF-8 BOM.'
+          }
+          $gateText = [Text.UTF8Encoding]::new($false, $true).GetString($gateBytes)
+          if ([regex]::IsMatch($gateText, '\r(?!\n)')) {
+            throw 'Mapped runner path gate contains a non-canonical carriage return.'
+          }
+          $canonicalGateBytes = [Text.UTF8Encoding]::new($false).GetBytes(
+            $gateText.Replace("`r`n", "`n"))
+          $hasher = [Security.Cryptography.SHA256]::Create()
+          try {
+            $gateHash = [BitConverter]::ToString(
+              $hasher.ComputeHash($canonicalGateBytes)).Replace('-', '')
+          } finally { $hasher.Dispose() }
+          if ($gateHash -cne '3A75BA04FC5E66DAED8C4D7454DDBD2BDDB9F2F5712B74E5667668A94E286A40') {
+            throw 'Mapped runner path gate failed its canonical SHA-256 pin.'
+          }
+          $toolchainPath = [IO.Path]::GetFullPath($env:FFB_TOOLCHAIN_X64_CMD)
+          if ($toolchainPath -cnotmatch
+              '^C:\\ffb-v1-[0-9a-f]{32}\\Toolchain\\x64\.cmd$') {
+            throw 'Host x64 toolchain path cannot derive the disposable runtime.'
+          }
+          $runtimeRoot = [IO.Directory]::GetParent(
+            [IO.Path]::GetDirectoryName($toolchainPath)).FullName
+          $binding = & $pathGate -PhysicalRuntimeRoot $runtimeRoot `
+            -RunnerTemp $env:RUNNER_TEMP -RunnerToolCache $env:RUNNER_TOOL_CACHE `
+            -Workspace $env:GITHUB_WORKSPACE -RepositorySlug $env:GITHUB_REPOSITORY
+          Write-Host "Mapped runner binding verified: $($binding.MappedWorkRoot)"
       - name: Validate repository dispatch payload
         id: validated-payload
         shell: pwsh
@@ -306,15 +340,68 @@ jobs:
       - name: Install isolated uv-managed Python
         shell: pwsh
         run: |
-          $pythonRoot = [IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP 'uv-python'))
+          $runnerTemp = (Resolve-Path -LiteralPath $env:RUNNER_TEMP -ErrorAction Stop).Path
+          if ($runnerTemp -cnotmatch '^(?<drive>[D-Z]):\\_work\\_temp$') {
+            throw 'uv installation requires the exact mapped runner temp root.'
+          }
+          $mappedRoot = $Matches.drive.ToUpperInvariant() + ':\'
+          $expectedUvPaths = [ordered]@{
+            UV_CACHE_DIR = [IO.Path]::Combine($runnerTemp, 'uv-cache')
+            UV_TOOL_DIR = [IO.Path]::Combine($runnerTemp, 'uv-tool-dir')
+            UV_TOOL_BIN_DIR = [IO.Path]::Combine($runnerTemp, 'uv-tool-bin-dir')
+          }
+          foreach ($entry in $expectedUvPaths.GetEnumerator()) {
+            $name = [string]$entry.Key
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if ([string]::IsNullOrWhiteSpace($value)) {
+              throw "$name was not exported by the pinned setup-uv action."
+            }
+            $full = [IO.Path]::GetFullPath($value)
+            if ($full -cne $value -or $full -cne [string]$entry.Value) {
+              throw "$name is not the exact mapped runner-temp path."
+            }
+            $current = $mappedRoot
+            foreach ($segment in @($full.Substring($mappedRoot.Length) -split '\\' |
+                Where-Object { $_ })) {
+              $current = Join-Path $current $segment
+              if (-not (Test-Path -LiteralPath $current)) { break }
+              if (((Get-Item -LiteralPath $current -Force).Attributes -band
+                    [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "$name contains a reparse point: $current"
+              }
+            }
+          }
+          $pythonRoot = [IO.Path]::Combine($runnerTemp, 'uv-python')
           [IO.Directory]::CreateDirectory($pythonRoot) | Out-Null
+          if (((Get-Item -LiteralPath $pythonRoot -Force).Attributes -band
+                [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'uv-managed Python root must not be a reparse point.'
+          }
           $env:UV_PYTHON_INSTALL_DIR = $pythonRoot
           "UV_PYTHON_INSTALL_DIR=$pythonRoot" |
             Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
           uv python install 3.13.15
           if ($LASTEXITCODE -ne 0) { throw 'uv-managed Python 3.13 installation failed.' }
-          uv python find 3.13.15 --managed-python
-          if ($LASTEXITCODE -ne 0) { throw 'uv-managed Python 3.13 was not found after installation.' }
+          $pythonMatches = @(uv python find 3.13.15 --managed-python |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+          if ($LASTEXITCODE -ne 0 -or $pythonMatches.Count -ne 1) {
+            throw 'uv-managed Python 3.13 was not found exactly once after installation.'
+          }
+          $python = (Resolve-Path -LiteralPath ([string]$pythonMatches[0]) -ErrorAction Stop).Path
+          $pythonPrefix = $pythonRoot.TrimEnd('\') + '\'
+          if (-not $python.StartsWith($pythonPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+              -not (Test-Path -LiteralPath $python -PathType Leaf)) {
+            throw 'uv-managed Python resolved outside its mapped runner temp root.'
+          }
+          $current = $pythonRoot
+          foreach ($segment in @($python.Substring($pythonRoot.Length).TrimStart('\') -split '\\' |
+              Where-Object { $_ })) {
+            $current = Join-Path $current $segment
+            if (((Get-Item -LiteralPath $current -Force).Attributes -band
+                  [IO.FileAttributes]::ReparsePoint) -ne 0) {
+              throw "uv-managed Python path contains a reparse point: $current"
+            }
+          }
       - name: Configure unsigned Full experimental channel
         shell: pwsh
         run: |
@@ -373,13 +460,14 @@ jobs:
             )
             $values = [Collections.Generic.Dictionary[string,string]]::new(
               [StringComparer]::OrdinalIgnoreCase)
-            foreach ($line in $lines[1..($lines.Count - 1)]) {
-              if ($line.IndexOfAny([char[]]'%!^&|<>') -ge 0 -or
-                  $line -cnotmatch '^set "(?<name>[A-Za-z_][A-Za-z0-9_()]*)=(?<value>[^"\r\n]*)"\z' -or
+           foreach ($line in $lines[1..($lines.Count - 1)]) {
+             if ($line.IndexOfAny([char[]]'%!^&|<>') -ge 0 -or
+                 $line -cnotmatch '^set "(?<name>[A-Za-z_][A-Za-z0-9_()]*)=(?<value>[^"\r\n]*)"\z' -or
                   $allowedNames -notcontains $Matches.name -or
-                  -not $values.TryAdd($Matches.name, $Matches.value)) {
+                  $values.ContainsKey($Matches.name)) {
                 throw "$Architecture host toolchain snapshot contains an unsafe or duplicate command."
               }
+              $values.Add($Matches.name, $Matches.value)
             }
             foreach ($requiredName in @(
               'PATH', 'INCLUDE', 'LIB', 'LIBPATH', 'VCINSTALLDIR', 'VCToolsInstallDir',
@@ -441,16 +529,36 @@ jobs:
           if ($simHubPath -ine [IO.Path]::Combine($runtimeX64, 'Sdk')) {
             throw 'The SimHub SDK snapshot is not bound to the toolchain runtime.'
           }
-          $runnerTemp = (Resolve-Path -LiteralPath $env:RUNNER_TEMP -ErrorAction Stop).Path
-          $workspace = (Resolve-Path -LiteralPath $env:GITHUB_WORKSPACE -ErrorAction Stop).Path
-          $runtimePrefix = $runtimeX64.TrimEnd('\') + '\'
-          if (-not $runnerTemp.StartsWith($runtimePrefix, [StringComparison]::OrdinalIgnoreCase) -or
-              -not $workspace.StartsWith($runtimePrefix, [StringComparison]::OrdinalIgnoreCase) -or
-              $workspace.Substring($runtimeX64.Length).TrimStart('\') -notmatch
-                '^(?:runner\\)?_work\\') {
-            throw 'Runner temp/workspace is outside the toolchain disposable runtime.'
+          $pathGate = (Resolve-Path -LiteralPath '.github/scripts/assert-mapped-runner-paths.ps1' `
+            -ErrorAction Stop).Path
+          $gateBytes = [IO.File]::ReadAllBytes($pathGate)
+          if ($gateBytes.Length -ge 3 -and $gateBytes[0] -eq 0xEF -and
+              $gateBytes[1] -eq 0xBB -and $gateBytes[2] -eq 0xBF) {
+            throw 'Mapped runner path gate must not contain a UTF-8 BOM.'
           }
-          foreach ($boundPath in @($runtimeX64, $simHubPath, $runnerTemp, $workspace)) {
+          $gateText = [Text.UTF8Encoding]::new($false, $true).GetString($gateBytes)
+          if ([regex]::IsMatch($gateText, '\r(?!\n)')) {
+            throw 'Mapped runner path gate contains a non-canonical carriage return.'
+          }
+          $canonicalGateBytes = [Text.UTF8Encoding]::new($false).GetBytes(
+            $gateText.Replace("`r`n", "`n"))
+          $hasher = [Security.Cryptography.SHA256]::Create()
+          try {
+            $gateHash = [BitConverter]::ToString(
+              $hasher.ComputeHash($canonicalGateBytes)).Replace('-', '')
+          } finally { $hasher.Dispose() }
+          if ($gateHash -cne '3A75BA04FC5E66DAED8C4D7454DDBD2BDDB9F2F5712B74E5667668A94E286A40') {
+            throw 'Mapped runner path gate failed its canonical SHA-256 pin.'
+          }
+          $runnerBinding = & $pathGate `
+            -PhysicalRuntimeRoot $runtimeX64 `
+            -RunnerTemp $env:RUNNER_TEMP `
+            -RunnerToolCache $env:RUNNER_TOOL_CACHE `
+            -Workspace $env:GITHUB_WORKSPACE `
+            -RepositorySlug $env:GITHUB_REPOSITORY
+          $runnerTemp = [string]$runnerBinding.RunnerTemp
+          $workspace = [string]$runnerBinding.Workspace
+          foreach ($boundPath in @($runtimeX64, $simHubPath)) {
             $current = $runtimeX64
             $relative = $boundPath.Substring($runtimeX64.Length).TrimStart('\')
             foreach ($segment in @($relative -split '\\' | Where-Object { $_ })) {
@@ -472,7 +580,9 @@ jobs:
             "toolchain_x64_sha256=$($env:FFB_TOOLCHAIN_X64_SHA256)",
             "toolchain_x86=$toolchainX86",
             "toolchain_x86_sha256=$($env:FFB_TOOLCHAIN_X86_SHA256)",
-            "runtime_root=$runtimeX64"
+            "runtime_root=$runtimeX64",
+            "runner_mapped_root=$($runnerBinding.MappedRoot)",
+            "runner_physical_work_root=$($runnerBinding.PhysicalWorkRoot)"
           ) | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Build channel-policy launcher, hook, manager, and tests
         shell: pwsh
