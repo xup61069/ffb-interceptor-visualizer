@@ -22,7 +22,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: refs/heads/master
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Validate preflight payload and bind master
@@ -30,6 +30,7 @@ jobs:
         shell: pwsh
         env:
           FFB_CLIENT_PAYLOAD_JSON: ${{ toJson(github.event.client_payload) }}
+          FFB_WORKFLOW_COMMIT: ${{ github.sha }}
         run: |
           $payload = $env:FFB_CLIENT_PAYLOAD_JSON | ConvertFrom-Json -ErrorAction Stop
           $names = @($payload.PSObject.Properties | ForEach-Object Name | Sort-Object)
@@ -54,8 +55,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Unable to refresh origin/master for runner preflight.' }
           $head = (git rev-parse HEAD).Trim().ToLowerInvariant()
           $master = (git rev-parse refs/remotes/origin/master).Trim().ToLowerInvariant()
-          if ($head -cne $commit -or $master -cne $commit) {
-            throw "Runner preflight source mismatch: payload=$commit, HEAD=$head, master=$master"
+          $workflowCommit = $env:FFB_WORKFLOW_COMMIT.ToLowerInvariant()
+          if ($workflowCommit -cnotmatch '^[0-9a-f]{40}\z' -or
+              $workflowCommit -cne $commit -or $head -cne $commit -or $master -cne $commit) {
+            throw "Runner preflight source mismatch: workflow=$workflowCommit, payload=$commit, HEAD=$head, master=$master"
           }
           "simhub_install_path=$normalisedSimHubPath" |
             Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -85,33 +88,168 @@ jobs:
       - name: Locate pinned Visual Studio 2022 Build Tools
         id: build-toolchain
         shell: pwsh
+        env:
+          FFB_VALIDATED_SIMHUB_PATH: ${{ steps.validated-payload.outputs.simhub_install_path }}
         run: |
-          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          $vsroots = @(& $vswhere -latest `
-            -products Microsoft.VisualStudio.Product.BuildTools `
-            -version '[17.0,18.0)' `
-            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          )
-          if ($LASTEXITCODE -ne 0 -or $vsroots.Count -ne 1) {
-            throw 'Exactly one Visual Studio 2022 Build Tools installation with C++ tools is required.'
+          function Resolve-HostToolchain {
+            param([string]$Path, [string]$Sha256, [string]$Architecture)
+            if ($Sha256 -cnotmatch '^[A-F0-9]{64}$') {
+              throw "$Architecture host toolchain requires an uppercase SHA-256 pin."
+            }
+            $resolved = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
+            $safePattern = '^C:\\ffb-v1-[0-9a-f]{32}\\Toolchain\\' +
+              [regex]::Escape($Architecture) + '\.cmd\z'
+            if ($resolved -notmatch $safePattern -or
+                $resolved.IndexOfAny([char[]]'%!^&|<>') -ge 0) {
+              throw "$Architecture host toolchain is outside its bound disposable runtime path."
+            }
+            if ([IO.Path]::GetExtension($resolved) -cne '.cmd') {
+              throw "$Architecture host toolchain must be a .cmd snapshot."
+            }
+            $item = Get-Item -LiteralPath $resolved -Force
+            $toolchainDirectory = Get-Item -LiteralPath ([IO.Path]::GetDirectoryName($resolved)) -Force
+            $runtimeDirectory = Get-Item -LiteralPath $toolchainDirectory.Parent.FullName -Force
+            foreach ($entry in @($item, $toolchainDirectory, $runtimeDirectory)) {
+              if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "$Architecture host toolchain path contains a reparse point."
+              }
+            }
+            if (($item.Attributes -band [IO.FileAttributes]::ReadOnly) -ne 0 -or
+                (Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash -cne $Sha256) {
+              throw "$Architecture host toolchain snapshot failed integrity validation."
+            }
+            $lines = [IO.File]::ReadAllLines($resolved)
+            if ($lines.Count -lt 2 -or $lines[0] -cne '@echo off') {
+              throw "$Architecture host toolchain snapshot has an invalid header."
+            }
+            $allowedNames = @(
+              'CommandPromptType', 'DevEnvDir', 'ExtensionSdkDir', 'FrameworkDir',
+              'FrameworkDir32', 'FrameworkVersion', 'FrameworkVersion32', 'INCLUDE', 'LIB',
+              'LIBPATH', 'NETFXSDKDir', 'PATH', 'UCRTVersion', 'UniversalCRTSdkDir',
+              'VCIDEInstallDir', 'VCINSTALLDIR', 'VCToolsInstallDir', 'VCToolsRedistDir',
+              'VisualStudioVersion', 'VSINSTALLDIR', 'VSCMD_ARG_app_plat',
+              'VSCMD_ARG_HOST_ARCH', 'VSCMD_ARG_TGT_ARCH', 'VSCMD_VER', 'WindowsLibPath',
+              'WindowsSdkBinPath', 'WindowsSdkDir', 'WindowsSDKLibVersion', 'WindowsSDKVersion'
+            )
+            $values = [Collections.Generic.Dictionary[string,string]]::new(
+              [StringComparer]::OrdinalIgnoreCase)
+            foreach ($line in $lines[1..($lines.Count - 1)]) {
+              if ($line.IndexOfAny([char[]]'%!^&|<>') -ge 0 -or
+                  $line -cnotmatch '^set "(?<name>[A-Za-z_][A-Za-z0-9_()]*)=(?<value>[^"\r\n]*)"\z' -or
+                  $allowedNames -notcontains $Matches.name -or
+                  -not $values.TryAdd($Matches.name, $Matches.value)) {
+                throw "$Architecture host toolchain snapshot contains an unsafe or duplicate command."
+              }
+            }
+            foreach ($requiredName in @(
+              'PATH', 'INCLUDE', 'LIB', 'LIBPATH', 'VCINSTALLDIR', 'VCToolsInstallDir',
+              'VSINSTALLDIR', 'WindowsSdkDir', 'VSCMD_ARG_HOST_ARCH', 'VSCMD_ARG_TGT_ARCH'
+            )) {
+              if (-not $values.ContainsKey($requiredName) -or
+                  [string]::IsNullOrWhiteSpace($values[$requiredName])) {
+                throw "$Architecture host toolchain snapshot is missing $requiredName."
+              }
+            }
+            if ($values['VSCMD_ARG_TGT_ARCH'] -cne $Architecture -or
+                $values['VSCMD_ARG_HOST_ARCH'] -cne 'x64') {
+              throw "$Architecture host toolchain snapshot has the wrong architecture."
+            }
+            $stream = $null
+            $fileWriteDenied = $false
+            try {
+              $stream = [IO.File]::Open($resolved, [IO.FileMode]::Open,
+                [IO.FileAccess]::Write, [IO.FileShare]::Read)
+            }
+            catch [UnauthorizedAccessException] { $fileWriteDenied = $true }
+            finally { if ($stream) { $stream.Dispose() } }
+            if (-not $fileWriteDenied) {
+              throw "$Architecture host toolchain snapshot is writable by the release job."
+            }
+            $probePath = Join-Path $toolchainDirectory.FullName `
+              ('.ffb-directory-write-probe-' + [Guid]::NewGuid().ToString('N') + '.tmp')
+            $probeStream = $null
+            $directoryWriteDenied = $false
+            try {
+              $probeStream = [IO.File]::Open($probePath, [IO.FileMode]::CreateNew,
+                [IO.FileAccess]::Write, [IO.FileShare]::None)
+            }
+            catch [UnauthorizedAccessException] { $directoryWriteDenied = $true }
+            finally {
+              if ($probeStream) { $probeStream.Dispose() }
+              if (Test-Path -LiteralPath $probePath) {
+                Remove-Item -LiteralPath $probePath -Force
+              }
+            }
+            if (-not $directoryWriteDenied) {
+              throw "$Architecture host toolchain directory is writable by the release job."
+            }
+            return $resolved
           }
-          $vsroot = [IO.Path]::GetFullPath([string]$vsroots[0])
-          $devcmd = Join-Path $vsroot 'Common7\Tools\VsDevCmd.bat'
-          if (-not (Test-Path -LiteralPath $devcmd -PathType Leaf)) {
-            throw 'Visual Studio 2022 Build Tools developer command script was not found.'
+          $toolchainX64 = Resolve-HostToolchain -Path $env:FFB_TOOLCHAIN_X64_CMD `
+            -Sha256 $env:FFB_TOOLCHAIN_X64_SHA256 -Architecture 'x64'
+          $toolchainX86 = Resolve-HostToolchain -Path $env:FFB_TOOLCHAIN_X86_CMD `
+            -Sha256 $env:FFB_TOOLCHAIN_X86_SHA256 -Architecture 'x86'
+          $runtimeX64 = [IO.Directory]::GetParent(
+            [IO.Path]::GetDirectoryName($toolchainX64)).FullName
+          $runtimeX86 = [IO.Directory]::GetParent(
+            [IO.Path]::GetDirectoryName($toolchainX86)).FullName
+          if ($toolchainX64 -ieq $toolchainX86 -or $runtimeX64 -ine $runtimeX86) {
+            throw 'x64 and x86 host toolchains must be distinct snapshots in one runtime.'
+          }
+          $simHubPath = (Resolve-Path -LiteralPath $env:FFB_VALIDATED_SIMHUB_PATH `
+            -ErrorAction Stop).Path
+          if ($simHubPath -ine [IO.Path]::Combine($runtimeX64, 'Sdk')) {
+            throw 'The SimHub SDK snapshot is not bound to the toolchain runtime.'
+          }
+          $runnerTemp = (Resolve-Path -LiteralPath $env:RUNNER_TEMP -ErrorAction Stop).Path
+          $workspace = (Resolve-Path -LiteralPath $env:GITHUB_WORKSPACE -ErrorAction Stop).Path
+          $runtimePrefix = $runtimeX64.TrimEnd('\') + '\'
+          if (-not $runnerTemp.StartsWith($runtimePrefix, [StringComparison]::OrdinalIgnoreCase) -or
+              -not $workspace.StartsWith($runtimePrefix, [StringComparison]::OrdinalIgnoreCase) -or
+              $workspace.Substring($runtimeX64.Length).TrimStart('\') -notmatch
+                '^(?:runner\\)?_work\\') {
+            throw 'Runner temp/workspace is outside the toolchain disposable runtime.'
+          }
+          foreach ($boundPath in @($runtimeX64, $simHubPath, $runnerTemp, $workspace)) {
+            $current = $runtimeX64
+            $relative = $boundPath.Substring($runtimeX64.Length).TrimStart('\')
+            foreach ($segment in @($relative -split '\\' | Where-Object { $_ })) {
+              $current = Join-Path $current $segment
+              if (((Get-Item -LiteralPath $current -Force).Attributes -band
+                    [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Bound runtime path contains a reparse point: $current"
+              }
+            }
+          }
+          $vsroot = (Resolve-Path -LiteralPath $env:FFB_VISUAL_STUDIO_INSTALL_PATH `
+            -ErrorAction Stop).Path
+          if (-not (Test-Path -LiteralPath (Join-Path $vsroot 'VC\Tools\MSVC') -PathType Container)) {
+            throw 'The host-bound Visual Studio Build Tools root is invalid.'
           }
           @(
             "visual_studio_install_path=$vsroot",
-            "visual_studio_devcmd=$devcmd"
+            "toolchain_x64=$toolchainX64",
+            "toolchain_x64_sha256=$($env:FFB_TOOLCHAIN_X64_SHA256)",
+            "toolchain_x86=$toolchainX86",
+            "toolchain_x86_sha256=$($env:FFB_TOOLCHAIN_X86_SHA256)",
+            "runtime_root=$runtimeX64"
           ) | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Build and test x64 and x86 trees
         shell: pwsh
         env:
-          FFB_VISUAL_STUDIO_DEVCMD: ${{ steps.build-toolchain.outputs.visual_studio_devcmd }}
+          FFB_TOOLCHAIN_X64_CMD: ${{ steps.build-toolchain.outputs.toolchain_x64 }}
+          FFB_TOOLCHAIN_X64_SHA256: ${{ steps.build-toolchain.outputs.toolchain_x64_sha256 }}
+          FFB_TOOLCHAIN_X86_CMD: ${{ steps.build-toolchain.outputs.toolchain_x86 }}
+          FFB_TOOLCHAIN_X86_SHA256: ${{ steps.build-toolchain.outputs.toolchain_x86_sha256 }}
         run: |
           foreach ($architecture in @('x64', 'x86')) {
+            $toolchain = [string](Get-Item "env:FFB_TOOLCHAIN_$($architecture.ToUpperInvariant())_CMD").Value
+            $expectedHash = [string](Get-Item "env:FFB_TOOLCHAIN_$($architecture.ToUpperInvariant())_SHA256").Value
+            if ((Get-FileHash -LiteralPath $toolchain -Algorithm SHA256).Hash -cne $expectedHash) {
+              throw "$architecture host toolchain snapshot changed before the build."
+            }
             $build = "build\$architecture-preflight"
-            $command = "call `"$env:FFB_VISUAL_STUDIO_DEVCMD`" -arch=$architecture >nul && " +
+            $command = "call `"$toolchain`" && " +
               "cmake -S . -B $build -G Ninja -DCMAKE_BUILD_TYPE=Release " +
               '-DFFB_STABLE_PACKAGE=OFF -DFFB_EXPECTED_SIGNER_SHA256= && ' +
               "cmake --build $build --target all && ctest --test-dir $build --output-on-failure"
@@ -124,11 +262,21 @@ jobs:
           RELEASE_TAG: local
           SIMHUB_INSTALL_PATH: ${{ steps.validated-payload.outputs.simhub_install_path }}
           FFB_VISUAL_STUDIO_INSTALL_PATH: ${{ steps.build-toolchain.outputs.visual_studio_install_path }}
+          FFB_TOOLCHAIN_X64_CMD: ${{ steps.build-toolchain.outputs.toolchain_x64 }}
+          FFB_TOOLCHAIN_X64_SHA256: ${{ steps.build-toolchain.outputs.toolchain_x64_sha256 }}
+          FFB_TOOLCHAIN_X86_CMD: ${{ steps.build-toolchain.outputs.toolchain_x86 }}
+          FFB_TOOLCHAIN_X86_SHA256: ${{ steps.build-toolchain.outputs.toolchain_x86_sha256 }}
           FFB_SIGNING_CERT_SHA1: ''
           FFB_SIGNER_SHA256: ''
+          FFB_EXPECTED_COMMIT: ${{ github.sha }}
         run: |
           .github/scripts/package-release.ps1 `
-            -VisualStudioInstallPath $env:FFB_VISUAL_STUDIO_INSTALL_PATH
+            -VisualStudioInstallPath $env:FFB_VISUAL_STUDIO_INSTALL_PATH `
+            -ToolchainX64Path $env:FFB_TOOLCHAIN_X64_CMD `
+            -ToolchainX64Sha256 $env:FFB_TOOLCHAIN_X64_SHA256 `
+            -ToolchainX86Path $env:FFB_TOOLCHAIN_X86_CMD `
+            -ToolchainX86Sha256 $env:FFB_TOOLCHAIN_X86_SHA256 `
+            -ExpectedCommitSha $env:FFB_EXPECTED_COMMIT
           $outputRoot = [IO.Path]::GetFullPath((Join-Path $env:RUNNER_TEMP `
             ('ffb-full-preflight-' + [Guid]::NewGuid().ToString('N'))))
           $tempPrefix = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'

@@ -32,13 +32,14 @@ SimHub 必須安裝在實體固定本機磁碟；網路／卸除式磁碟、`SUB
 
 ## 套件信任政策
 
-`v1.0.0` 是首個 1.x 產品版本，不代表資產已簽章；實際信任政策要看 Release 頁面標示的
-Stable／Experimental。
+`v1.0.0` 是首個 1.x 產品版本，不代表資產已簽章。V1 目前兩條公開 workflow 都只發布
+未簽章 Experimental；完整流程收到 `stable` 會 fail-closed，且完全不讀簽章 secrets。
+Stable 的程式內政策與封裝測試仍保留，但不是已啟用的公開頻道。
 
 | 頻道 | 實際政策 |
 | --- | --- |
-| Stable | 以 fail-closed Manager 建置。執行中 Manager 與 manifest 內所有 `.exe`、`.dll`、`.ps1`、`.psm1` 都要驗證；目前 Launcher allowlist 合計 11 個簽章 payload。全部必須通過 Authenticode 信任鏈及撤銷檢查、同一 signer，並符合建置時釘選的憑證 SHA-256，否則拒絕安裝與啟動。流程已實作，但儲存庫不宣稱目前已有公信簽章憑證或已發布 Stable 資產。 |
-| Experimental | 兩條公開發行流程都固定不簽章，也完全不讀 Stable 的簽章 secrets；Manager 會明確警告。套件內 `SHA256SUMS.txt` 的精確檔案清單與 SHA-256 仍是硬性閘門；使用者另須從官方 Release 核對外層 `SHA256SUMS`，並用 `gh attestation verify <檔案> --repo xup61069/ffb-interceptor-visualizer` 驗證外部 provenance。Attestation 不等於 Authenticode。 |
+| Stable（公開流程未啟用） | 程式內保留 fail-closed Manager 政策：執行中 Manager 與 manifest 內所有 `.exe`、`.dll`、`.ps1`、`.psm1` 都要驗證；目前 Launcher allowlist 合計 11 個簽章 payload。全部必須通過 Authenticode 信任鏈及撤銷檢查、同一 signer，並符合建置時釘選的憑證 SHA-256，否則拒絕安裝與啟動。未來公開 Stable 還需要獨立且不執行未信任建置程式的簽章 job、公信憑證與實體測試。 |
+| Experimental（現行公開頻道） | 兩條公開發行流程都固定不簽章，也完全不讀任何 Stable 簽章 secrets；Manager 會明確警告。套件內 `SHA256SUMS.txt` 的精確檔案清單與 SHA-256 仍是硬性閘門；使用者另須從官方 Release 核對外層 `SHA256SUMS`，並用 `gh attestation verify <檔案> --repo xup61069/ffb-interceptor-visualizer` 驗證外部 provenance。Attestation 不等於 Authenticode。 |
 
 Manager 會拒絕缺檔、多檔、重複或跳脫路徑、reparse point、雜湊錯誤、遊戲／Hook
 架構不合、外掛安裝雜湊不合與未就緒狀態。通過後會鎖住套件必要檔案直到操作完成；
@@ -48,7 +49,8 @@ Manager 會拒絕缺檔、多檔、重複或跳脫路徑、reparse point、雜�
 跨程序、零共享的 delete-on-close mutation lease。既有狀態若指向另一個 SimHub 根目錄，
 必須先解除安裝才能切換。
 
-Stable EXE 另含唯一、NUL 結尾且釘選 signer 的 `FFB_MANAGER_BUILD_POLICY_V1` marker；
+未啟用於公開發行的 Stable EXE 支援另含唯一、NUL 結尾且釘選 signer 的
+`FFB_MANAGER_BUILD_POLICY_V1` marker；
 封裝器會在簽章前後重新解析 raw PE，要求 marker 完整落在 `.rdata` 的 raw size 與
 mapped `VirtualSize` 範圍；區段必須是 initialized-data／READ、不得 WRITE／EXEC，並
 拒絕 raw padding、憑證表／overlay 假標記。最後再核對 Manager Authenticode leaf
@@ -125,19 +127,38 @@ v1.0.0 相容矩陣目前只有下列 profile（紀錄日期 2026-08-30）：
 
 兩條公開發行 workflow 都只接受授權維護者送出的 `repository_dispatch`，並只從預設
 分支 `master` 載入。基礎流程 payload 必須剛好只有 `tag`；完整流程必須剛好只有
-`tag`、`channel` 與 `simhub_path`。欄位或格式不合就停止。建立或推送 tag 本身不會
-發布 Release；維護者仍須先為該 tag 選定唯一 publisher。
+`tag`、`channel` 與 `simhub_path`，其中 `channel` 只接受小寫 `experimental`；`stable`、
+欄位或格式不合都會 fail-closed。建立或推送 tag 本身不會發布 Release；維護者仍須先為
+該 tag 選定唯一 publisher。Full 即使恢復 private mutable draft，也要求 `github.sha`、
+checkout、當下 `origin/master`、tag commit 與 build output 是同一 SHA；只有 Base
+Experimental 草稿恢復可使用 master ancestor。
 
 Hosted Experimental 基礎發行只有 Proxy x86／x64、Viewer x64、source、四份 SBOM 與
 `SHA256SUMS`。只有 labels 完整符合
-`[self-hosted, Windows, X64, simhub-sdk, ephemeral]` 的完整流程，才會再產生
+`[self-hosted, Windows, X64, simhub-sdk, ephemeral, ffb-release]` 的完整流程，才會再產生
 `FFBInterceptor-SimHub-1.0.0.zip` 與 `FFBInterceptor-Launcher-1.0.0.zip`。
+
+完整流程的 Low IL AppContainer self-hosted 建置 job 只有 `actions: read`、`checks: read`、
+`contents: read`，只建置並透過 Actions artifact 移交精確 11 個資產；它沒有 Release、OIDC、
+attestation 或簽章 secret 權限。獨立 `windows-latest` 發布 job 才具有
+`contents: write`、`id-token: write`、`attestations: write`，並綁定 `stable-signing`
+environment 人工核准。它只驗證資料的精確清單、路徑與 SHA-256，不執行建置產物，之後
+產生 provenance 並發布為 prerelease Experimental。environment 名稱不代表正在簽署 Stable。
+其中 SimHub／Launcher ZIP 會在 hosted job 再做純靜態 exact-entry、內層 SHA-256、禁止
+`dinput8.dll` 與禁止夾帶 SimHub proprietary SDK DLL 的驗證。Attestation 只證明 publisher
+收到並送出的 exact bytes 與 workflow／commit 身分，不代表 self-hosted 主機乾淨或二進位可重現。
+它也不會把允許名稱下的 scripts、文件、Dashboard 或 PE 內容逐一和受信任 checkout 做
+同源比對；遭入侵的 builder 仍可能產生內層 manifest 自洽但內容惡意的 Experimental 資產。
+這是本版明示接受的殘餘風險，未來 Stable 不得沿用這個信任假設。
 
 截至 2026-09-03，GitHub 已啟用 immutable releases；tag ruleset `21893944` 會保護
 `refs/tags/v*`，禁止更新或刪除；`stable-signing` environment 只允許 `master`，並由
-`xup61069` 審核。完整發行只使用按工作臨時註冊、完成後自動退役的一次性 runner；目前
-仍沒有公信程式碼簽章憑證與對應 secrets，也沒有實體方向盤／商業遊戲測試證據，不能
-把未簽章 Full 資產宣稱為 Stable。完整細節見
+`xup61069` 審核。完整發行只使用按工作臨時註冊、完成後自動退役的一次性 runner。
+若使用持續存在的 Windows 主機，runner 必須位於通過原生 credential／filesystem probe 的
+Low IL AppContainer，且 SDK 與 x64／x86 toolchain snapshots 對 job 唯讀；
+目前仍沒有公信程式碼簽章憑證與對應 secrets，也沒有實體方向盤／商業遊戲測試證據，不能
+把未簽章 Full 資產宣稱為 Stable。未來公開 Stable 還必須有獨立且不執行未信任建置程式的
+簽章 job、公信憑證與實體測試；目前沒有 Stable dispatch 或 Stable recovery。完整細節見
 [發行流程](docs/release-process.md)。
 
 ## 支援限制

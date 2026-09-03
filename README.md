@@ -41,13 +41,14 @@ Release 頁面沒有 `FFBInterceptor-Launcher-1.0.0.zip`，代表該次只有 Gi
 
 ## Stable 與 Experimental 要怎麼分
 
-`v1.0.0` 是首個 1.x 產品版本；它不等於「已簽章」。Release 頁面標示的
-Stable／Experimental 才是簽章與啟動政策，兩者不可混為一談。
+`v1.0.0` 是首個 1.x 產品版本；它不等於「已簽章」。V1 目前兩條公開 workflow 都只發布
+未簽章 Experimental；完整流程收到 `stable` 會 fail-closed，且兩條流程都完全不讀簽章
+secrets。下列 Stable 規則是仍保留於程式與封裝測試中的政策支援，並不是已啟用的公開頻道。
 
 | 頻道 | 啟動規則 | 使用者應做的驗證 |
 | --- | --- | --- |
-| Stable（穩定版） | Manager 以 fail-closed 政策建置。它會驗證執行中 Manager，以及 manifest 內所有 `.exe`、`.dll`、`.ps1`、`.psm1`；目前 Launcher allowlist 合計 11 個簽章 payload。全部必須通過 Windows Authenticode 信任鏈與撤銷檢查、使用同一簽署者，並符合建置時釘選的憑證 SHA-256；任一項失敗就拒絕安裝與啟動。 | 先在 Windows 檔案內容確認數位簽章，再核對 `SHA256SUMS`。Stable 流程已實作，但本儲存庫不宣稱目前已擁有公信程式碼簽章憑證或已發布 Stable 資產。 |
-| Experimental（實驗版） | 兩條公開發行流程的 Experimental 都固定不簽章，也完全不讀 Stable 的簽章 secrets。Manager 仍會嚴格驗證套件內 `SHA256SUMS.txt`、必要檔案、精確清單與逐檔 SHA-256，但不把 Authenticode 當成啟動門檻，介面會顯示警告。 | 從官方 Release 下載，核對外層 `SHA256SUMS`，並在執行前以 GitHub CLI 的 `gh attestation verify <檔案> --repo xup61069/ffb-interceptor-visualizer` 驗證 provenance attestation。Attestation 不是 Authenticode，也不能取代解壓後的逐檔雜湊。 |
+| Stable（穩定版，公開流程未啟用） | 程式內保留 fail-closed Manager 政策：驗證執行中 Manager，以及 manifest 內所有 `.exe`、`.dll`、`.ps1`、`.psm1`；目前 Launcher allowlist 合計 11 個簽章 payload。全部必須通過 Windows Authenticode 信任鏈與撤銷檢查、使用同一簽署者，並符合建置時釘選的憑證 SHA-256；任一項失敗就拒絕安裝與啟動。 | 未來公開 Stable 還必須有獨立且不執行未信任建置程式的簽章 job、公信程式碼簽章憑證，以及實體方向盤／商業遊戲測試。現行公開 workflow 不會產生 Stable 資產。 |
+| Experimental（實驗版，現行公開頻道） | 兩條公開發行流程都固定不簽章，也完全不讀任何 Stable 簽章 secrets。Manager 仍會嚴格驗證套件內 `SHA256SUMS.txt`、必要檔案、精確清單與逐檔 SHA-256，但不把 Authenticode 當成啟動門檻，介面會顯示警告。 | 從官方 Release 下載，核對外層 `SHA256SUMS`，並在執行前以 GitHub CLI 的 `gh attestation verify <檔案> --repo xup61069/ffb-interceptor-visualizer` 驗證 provenance attestation。Attestation 不是 Authenticode，也不能取代解壓後的逐檔雜湊。 |
 
 Manager 啟動或安裝前還會確認套件沒有缺檔、多檔、重複／跳脫路徑、reparse point
 或雜湊不符，檢查遊戲與 Launcher／Hook 架構一致、SimHub 外掛安裝狀態及具名管道
@@ -58,7 +59,7 @@ readiness。驗證成功後，必要檔案會保持唯讀鎖定直到安裝或�
 實體磁碟、逐層目錄身分及跨程序、零共享的 delete-on-close mutation lease 重新確認並
 保持鎖定；若既有狀態指向另一個 SimHub 根目錄，必須先解除安裝再切換。
 
-Stable Manager 內含唯一、NUL 結尾的
+尚未啟用於公開發行的 Stable Manager 支援會內含唯一、NUL 結尾的
 `FFB_MANAGER_BUILD_POLICY_V1|MODE=STABLE|SIGNER_SHA256=<64 HEX>|END` marker。封裝器會
 在簽章前後都重新解析 raw PE，要求 marker 完整落在 `.rdata` 的 raw size 與 mapped
 `VirtualSize` 範圍；該區段必須是 initialized-data／READ、不得 WRITE／EXEC，並拒絕
@@ -154,8 +155,11 @@ GitHub-hosted Windows CI 不需要 proprietary SimHub SDK，就能執行以下�
 
 兩條公開發行 workflow 都只接受授權維護者送出的 `repository_dispatch`，而且只從
 預設分支 `master` 載入 workflow。基礎流程的 payload 必須剛好只有 `tag`；完整流程
-必須剛好只有 `tag`、`channel` 與 `simhub_path`。欄位多一個、少一個或格式不合都會
-停止。建立或推送 tag 本身不會發布 Release；維護者仍須先為該 tag 選定唯一 publisher。
+必須剛好只有 `tag`、`channel` 與 `simhub_path`，其中 `channel` 只接受小寫
+`experimental`，`stable` 會 fail-closed。欄位多一個、少一個或格式不合都會停止。
+建立或推送 tag 本身不會發布 Release；維護者仍須先為該 tag 選定唯一 publisher。Full 即使
+恢復 private mutable draft，也要求 `github.sha`、checkout、當下 `origin/master`、tag commit
+與 build output 是同一 SHA；只有 Base Experimental 草稿恢復可使用 master ancestor。
 
 GitHub-hosted Experimental 基礎發行會產生：
 
@@ -172,17 +176,36 @@ Core、SimHub adapter、Dashboards、Viewer）、`uv.lock` 中完整的 registry
 Python environment SBOM 則描述實際鎖定／安裝的 Python 發行套件；兩套都各有
 CycloneDX 與 SPDX 格式。
 
-完整 self-hosted 發行才會另外加入 `FFBInterceptor-SimHub-1.0.0.zip` 與首選的
-`FFBInterceptor-Launcher-1.0.0.zip`，runner labels 必須完整符合
+Full 流程的 self-hosted 建置才會另外加入 `FFBInterceptor-SimHub-1.0.0.zip` 與首選的
+`FFBInterceptor-Launcher-1.0.0.zip`，建置 runner labels 必須完整符合
 `[self-hosted, Windows, X64, simhub-sdk, ephemeral, ffb-release]`；不含 secrets 的預檢則用
 獨立 `ffb-preflight` label，避免兩類工作互搶。資產一旦同名上傳就不可由發行
 腳本覆寫。
 
+完整流程會把權限切成兩個 job：Low IL AppContainer 內的 self-hosted 建置 job 只有
+`actions: read`、`checks: read`、`contents: read`，固定以未簽章政策建置並透過 Actions
+artifact 移交精確 11 個資產；它沒有 Release、OIDC、attestation 或簽章 secret 權限。
+獨立的 `windows-latest` 發布 job 才具有 `contents: write`、`id-token: write` 與
+`attestations: write`，並綁定 `stable-signing` environment 的人工核准。該 job 只驗證
+下載資料的精確清單、路徑與 SHA-256，不執行任何建置產物，最後產生 provenance 並發布為
+prerelease Experimental。environment 名稱沿用既有設定，不代表 V1 正在執行 Stable 簽章。
+其中 SimHub／Launcher ZIP 會在 hosted job 再做純靜態 exact-entry、內層 SHA-256、禁止
+`dinput8.dll` 與禁止夾帶 SimHub proprietary SDK DLL 的驗證。Attestation 只證明 publisher
+收到並送出的 exact bytes 與 workflow／commit 身分，不代表 self-hosted 主機乾淨或二進位可重現。
+它也不會把允許名稱下的 scripts、文件、Dashboard 或 PE 內容逐一和受信任 checkout 做
+同源比對；遭入侵的 builder 仍可能產生內層 manifest 自洽但內容惡意的 Experimental 資產。
+這是本版明示接受的殘餘風險，未來 Stable 不得沿用這個信任假設。
+
 截至 2026-09-03，GitHub 已啟用 immutable releases；tag ruleset `21893944` 會保護
 `refs/tags/v*`，禁止更新或刪除；`stable-signing` environment 只允許 `master`，並由
-`xup61069` 審核。完整發行只使用按工作臨時註冊、完成後自動退役的 ephemeral runner；
+`xup61069` 審核。完整發行的 self-hosted 建置只使用按工作臨時註冊、完成後自動退役的
+ephemeral runner；
+若使用持續存在的 Windows 主機，runner 必須位於通過原生 credential／filesystem probe 的
+Low IL AppContainer，且 SDK 與 x64／x86 toolchain snapshots 對 job 唯讀；
 目前仍沒有公信程式碼簽章憑證與對應 secrets，也沒有實體方向盤／商業遊戲測試證據，
-因此不能把未簽章 Full 資產宣稱為 Stable。操作與恢復規則見
+因此不能把未簽章 Full 資產宣稱為 Stable。公開 Stable 還需另建不執行未信任建置程式的
+獨立簽章 job、公信憑證與實體測試；目前沒有 Stable dispatch 或 Stable recovery。操作與
+Experimental 草稿恢復規則見
 [發行流程](docs/release-process.md)。
 
 ## 支援範圍

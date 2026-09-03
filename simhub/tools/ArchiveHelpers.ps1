@@ -103,11 +103,19 @@ function New-CanonicalZipArchive {
             }
             $relative = $fullItem.Substring($sourceRoot.Length + 1).Replace('\', '/')
             $entryName = if ($prefix) { "$prefix/$relative" } else { $relative }
-            if ($entryName.StartsWith('/', [StringComparison]::Ordinal) -or
+            if ([string]::IsNullOrWhiteSpace($entryName) -or
+                $entryName.StartsWith('/', [StringComparison]::Ordinal) -or
                 $entryName.Contains('\') -or
-                $entryName.IndexOf([char]0) -ge 0 -or
-                @($entryName.Split('/') | Where-Object { $_ -in @('', '.', '..') }).Count -gt 0) {
+                $entryName -match '[\x00-\x1F\x7F]') {
                 throw "Refusing a non-canonical archive entry name: $entryName"
+            }
+            foreach ($segment in @($entryName.Split('/'))) {
+                if ([string]::IsNullOrWhiteSpace($segment) -or
+                    $segment -in @('.', '..') -or $segment.Contains(':') -or
+                    $segment.EndsWith('.', [StringComparison]::Ordinal) -or
+                    $segment.EndsWith(' ', [StringComparison]::Ordinal)) {
+                    throw "Refusing a non-canonical archive entry name: $entryName"
+                }
             }
             if (-not $seenEntries.Add($entryName) -or $entries.ContainsKey($entryName)) {
                 throw "Refusing a duplicate archive entry name: $entryName"
@@ -126,10 +134,10 @@ function New-CanonicalZipArchive {
             [IO.FileAccess]::Write, [IO.FileShare]::None)
         $destinationCreated = $true
         $binaryWriter = [IO.BinaryWriter]::new(
-            $fileStream, [Text.UTF8Encoding]::new($false), $true)
+            $fileStream, [Text.UTF8Encoding]::new($false, $true), $true)
         try {
             $centralEntries = [Collections.Generic.List[object]]::new()
-            $utf8 = [Text.UTF8Encoding]::new($false)
+            $utf8 = [Text.UTF8Encoding]::new($false, $true)
             $dosTime = [uint16]0
             $dosDate = [uint16]0x2821
             foreach ($pair in $entries.GetEnumerator()) {
