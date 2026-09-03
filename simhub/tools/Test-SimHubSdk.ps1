@@ -13,7 +13,7 @@ if ([string]::IsNullOrWhiteSpace($FingerprintPath)) {
 $sdkRoot = [IO.Path]::GetFullPath($SimHubInstallPath)
 $manifestPath = (Resolve-Path -LiteralPath $FingerprintPath -ErrorAction Stop).Path
 if (-not (Test-Path -LiteralPath $sdkRoot -PathType Container)) {
-    throw "找不到 SimHub SDK 目錄：$sdkRoot"
+    throw "SimHub SDK directory not found: $sdkRoot"
 }
 $manifest = Get-Content -Raw -LiteralPath $manifestPath -Encoding UTF8 | ConvertFrom-Json
 if ($manifest.schemaVersion -ne 1 -or @($manifest.profiles).Count -eq 0) {
@@ -26,10 +26,10 @@ $requiredNames = @($manifest.profiles | ForEach-Object { $_.files } |
 foreach ($name in $requiredNames) {
     if ($name -notmatch '^[A-Za-z0-9._-]+\.dll$') { throw "Unsafe SDK file name: $name" }
     $path = Join-Path $sdkRoot $name
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "缺少 SimHub SDK 檔案：$name" }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing SimHub SDK file: $name" }
     $item = Get-Item -LiteralPath $path
     if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        throw "SimHub SDK 檔案不可為 reparse point：$name"
+        throw "SimHub SDK file must not be a reparse point: $name"
     }
     $observed[$name] = [pscustomobject]@{
         length = [long]$item.Length
@@ -56,4 +56,4 @@ foreach ($profile in @($manifest.profiles)) {
 $summary = @($requiredNames | ForEach-Object {
     "$_=$($observed[$_].sha256)/$($observed[$_].length)"
 }) -join '; '
-throw "SimHub SDK fingerprint 未列入相容矩陣，拒絕產生可發布外掛。Observed: $summary"
+throw "SimHub SDK fingerprint is not in the compatibility matrix; refusing to build a release plugin. Observed: $summary"
