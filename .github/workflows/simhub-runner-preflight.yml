@@ -167,4 +167,3 @@ jobs:
               Remove-Item -LiteralPath $outputRoot -Recurse -Force
             }
           }
-
